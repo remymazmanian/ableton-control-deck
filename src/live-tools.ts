@@ -1,0 +1,349 @@
+import { JsonLogger } from "./logger.js";
+import { oscFloat, oscInt, type LiveControlClient, type OscArgument, type ToolResult } from "./types.js";
+import { trackIndexSchema } from "./validation.js";
+
+const bool = (value: unknown) => value === true || value === 1;
+const last = (values: unknown[]) => values.at(-1);
+
+interface DeviceDescriptor {
+  index: number;
+  id: string;
+  name: string;
+  type: number;
+  className: string;
+}
+
+interface DeviceParameterDescriptor {
+  index: number;
+  id: string;
+  name: string;
+  value: number;
+  normalizedValue: number;
+  minimum: number;
+  maximum: number;
+  displayValue: string;
+  enabled: null;
+}
+
+export class LiveTools {
+  constructor(private readonly live: LiveControlClient, private readonly logger = new JsonLogger(), private readonly defaultDryRun = false) {}
+
+  private async fail<T>(tool: string, started: number, error: unknown): Promise<ToolResult<T>> {
+    const message = error instanceof Error ? error.message : String(error);
+    await this.logger.write({ tool, durationMs: performance.now() - started, success: false, error: message });
+    return { ok: false, dryRun: false, tool, error: { code: "ABLETON_OPERATION_FAILED", message } };
+  }
+
+  private async read<T>(tool: string, fn: () => Promise<T>): Promise<ToolResult<T>> {
+    const started = performance.now();
+    try {
+      const data = await fn();
+      await this.logger.write({ tool, durationMs: performance.now() - started, success: true, response: data });
+      return { ok: true, dryRun: false, tool, data };
+    } catch (error) { return this.fail(tool, started, error); }
+  }
+
+  private async mutate<T>(tool: string, args: unknown, operations: Array<{ address: string; args?: OscArgument[] }>, dryRun: boolean, verify: () => Promise<T>): Promise<ToolResult<T>> {
+    const started = performance.now();
+    const normalized = operations.map(op => ({ address: op.address, args: op.args ?? [] }));
+    if (dryRun || this.defaultDryRun) {
+      await this.logger.write({ tool, args, liveOperation: normalized, durationMs: performance.now() - started, success: true, dryRun: true });
+      return { ok: true, dryRun: true, tool, intendedOperations: normalized };
+    }
+    try {
+      for (const op of normalized) await this.live.send(op.address, op.args);
+      const data = await verify();
+      await this.logger.write({ tool, args, liveOperation: normalized, response: data, durationMs: performance.now() - started, success: true });
+      return { ok: true, dryRun: false, tool, data };
+    } catch (error) { return this.fail(tool, started, error); }
+  }
+
+  private async songValue(property: string): Promise<unknown> {
+    return last((await this.live.query(`/live/song/get/${property}`)).args);
+  }
+
+  private async waitForSongValue(property: string, expected: unknown): Promise<unknown> {
+    let value: unknown;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      value = await this.songValue(property);
+      if (typeof expected === "number" && typeof value === "number" ? Math.abs(value - expected) < 0.001 : value === expected) return value;
+      await new Promise(resolve => setTimeout(resolve, 75));
+    }
+    throw new Error(`Verification failed for ${property}: expected ${expected}, received ${value}`);
+  }
+
+  getTransport(): Promise<ToolResult> {
+    return this.read("get_transport", async () => {
+      const [isPlaying, songPosition, tempo, metronome, recordMode, sessionRecord, loop, loopStart, loopLength] = await Promise.all([
+        this.songValue("is_playing"), this.songValue("current_song_time"), this.songValue("tempo"),
+        this.songValue("metronome"), this.songValue("record_mode"), this.songValue("session_record"),
+        this.songValue("loop"), this.songValue("loop_start"), this.songValue("loop_length")
+      ]);
+      return { isPlaying: bool(isPlaying), songPositionBeats: Number(songPosition), tempo: Number(tempo), metronome: bool(metronome), arrangementRecording: bool(recordMode), sessionRecording: bool(sessionRecord), loop: { enabled: bool(loop), startBeats: Number(loopStart), lengthBeats: Number(loopLength) } };
+    });
+  }
+
+  getTimeSignature(): Promise<ToolResult> {
+    return this.read("get_time_signature", async () => ({ numerator: Number(await this.songValue("signature_numerator")), denominator: Number(await this.songValue("signature_denominator")) }));
+  }
+
+  play(dryRun = false): Promise<ToolResult> {
+    return this.mutate("play", { dryRun }, [{ address: "/live/song/start_playing" }], dryRun, async () => ({ isPlaying: bool(await this.waitForSongValue("is_playing", true)) }));
+  }
+
+  stop(dryRun = false): Promise<ToolResult> {
+    return this.mutate("stop", { dryRun }, [{ address: "/live/song/stop_playing" }], dryRun, async () => ({ isPlaying: bool(await this.waitForSongValue("is_playing", false)) }));
+  }
+
+  continuePlayback(dryRun = false): Promise<ToolResult> {
+    return this.mutate("continue_playback", { dryRun }, [{ address: "/live/song/continue_playing" }], dryRun, async () => ({ isPlaying: bool(await this.waitForSongValue("is_playing", true)) }));
+  }
+
+  setTimeSignature(numerator: number, denominator: number, dryRun = false): Promise<ToolResult> {
+    if (!Number.isInteger(numerator) || numerator < 1 || numerator > 99) throw new Error("Numerator must be an integer from 1 to 99.");
+    if (![1, 2, 4, 8, 16].includes(denominator)) throw new Error("Denominator must be one of 1, 2, 4, 8, or 16.");
+    const operations = [
+      { address: "/live/song/set/signature_numerator", args: [oscInt(numerator)] },
+      { address: "/live/song/set/signature_denominator", args: [oscInt(denominator)] }
+    ];
+    return this.mutate("set_time_signature", { numerator, denominator, dryRun }, operations, dryRun, async () => {
+      const actualNumerator = Number(await this.waitForSongValue("signature_numerator", numerator));
+      const actualDenominator = Number(await this.waitForSongValue("signature_denominator", denominator));
+      return { numerator: actualNumerator, denominator: actualDenominator, completedActions: operations.map(op => op.address), incompleteActions: [] };
+    });
+  }
+
+  setSongPosition(positionBeats: number, dryRun = false): Promise<ToolResult> {
+    if (!Number.isFinite(positionBeats) || positionBeats < 0) throw new Error("Song position must be a non-negative number of beats.");
+    return this.mutate("set_song_position", { positionBeats, dryRun }, [{ address: "/live/song/set/current_song_time", args: [oscFloat(positionBeats)] }], dryRun, async () => ({ songPositionBeats: Number(await this.waitForSongValue("current_song_time", positionBeats)) }));
+  }
+
+  async toggleMetronome(dryRun = false): Promise<ToolResult> {
+    const current = bool(await this.songValue("metronome"));
+    const next = !current;
+    return this.mutate("toggle_metronome", { dryRun }, [{ address: "/live/song/set/metronome", args: [next] }], dryRun, async () => ({ metronome: bool(await this.waitForSongValue("metronome", next)) }));
+  }
+
+  setRecording(enabled: boolean, dryRun = false): Promise<ToolResult> {
+    const tool = enabled ? "start_recording" : "stop_recording";
+    return this.mutate(tool, { dryRun }, [{ address: "/live/song/set/record_mode", args: [enabled] }], dryRun, async () => ({ arrangementRecording: bool(await this.waitForSongValue("record_mode", enabled)) }));
+  }
+
+  listScenes(): Promise<ToolResult> {
+    return this.read("list_scenes", async () => {
+      const names = (await this.live.query("/live/song/get/scenes/name")).args;
+      return { scenes: names.map((name, index) => ({ index, id: `scene:${index}`, name: String(name) })) };
+    });
+  }
+
+  getSelectedTrack(): Promise<ToolResult> {
+    return this.read("get_selected_track", async () => {
+      const index = Number(last((await this.live.query("/live/view/get/selected_track")).args));
+      const names = (await this.live.query("/live/song/get/track_names")).args.map(String);
+      return { index, id: `track:${index}`, name: names[index] };
+    });
+  }
+
+  getSelectedClip(): Promise<ToolResult> {
+    return this.read("get_selected_clip", async () => {
+      const reply = (await this.live.query("/live/view/get/selected_clip")).args;
+      const trackIndex = Number(reply[0]); const sceneIndex = Number(reply[1]);
+      const hasClip = bool(last((await this.live.query("/live/clip_slot/get/has_clip", [oscInt(trackIndex), oscInt(sceneIndex)])).args));
+      return { trackIndex, trackId: `track:${trackIndex}`, sceneIndex, sceneId: `scene:${sceneIndex}`, hasClip };
+    });
+  }
+
+  getTrack(trackIndex: number): Promise<ToolResult> {
+    trackIndexSchema.parse(trackIndex);
+    return this.read("get_track", async () => {
+      const names = (await this.live.query("/live/song/get/track_names")).args.map(String);
+      if (trackIndex >= names.length) throw new Error(`Track index ${trackIndex} does not exist.`);
+      const arg = [oscInt(trackIndex)];
+      const props = ["can_be_armed", "arm", "mute", "solo", "is_foldable", "is_grouped", "playing_slot_index", "volume", "panning"];
+      const values = await Promise.all(props.map(prop => this.live.query(`/live/track/get/${prop}`, arg).then(reply => last(reply.args))));
+      const data = Object.fromEntries(props.map((prop, index) => [prop, values[index]]));
+      return { index: trackIndex, id: `track:${trackIndex}`, name: names[trackIndex], canBeArmed: bool(data.can_be_armed), armed: bool(data.arm), muted: bool(data.mute), soloed: bool(data.solo), isGroup: bool(data.is_foldable), isGrouped: bool(data.is_grouped), playingSlotIndex: Number(data.playing_slot_index), volume: Number(data.volume), pan: Number(data.panning) };
+    });
+  }
+
+  listClips(trackIndex?: number): Promise<ToolResult> {
+    if (trackIndex !== undefined) trackIndexSchema.parse(trackIndex);
+    return this.read("list_clips", async () => {
+      const trackNames = (await this.live.query("/live/song/get/track_names")).args.map(String);
+      const indices = trackIndex === undefined ? trackNames.map((_name, index) => index) : [trackIndex];
+      const tracks = [];
+      for (const index of indices) {
+        if (index >= trackNames.length) throw new Error(`Track index ${index} does not exist.`);
+        const arg = [oscInt(index)];
+        const [namesReply, lengthsReply] = await Promise.all([this.live.query("/live/track/get/clips/name", arg), this.live.query("/live/track/get/clips/length", arg)]);
+        const names = namesReply.args.slice(1); const lengths = lengthsReply.args.slice(1);
+        const clips = names.map((name, sceneIndex) => name === null ? null : ({ trackIndex: index, sceneIndex, id: `clip:${index}:${sceneIndex}`, name: String(name), lengthBeats: Number(lengths[sceneIndex]) })).filter(Boolean);
+        tracks.push({ trackIndex: index, trackId: `track:${index}`, trackName: trackNames[index], clips });
+      }
+      return { tracks };
+    });
+  }
+
+  listDevices(trackIndex: number): Promise<ToolResult> {
+    trackIndexSchema.parse(trackIndex);
+    return this.read("list_devices", async () => ({ trackIndex, trackId: `track:${trackIndex}`, devices: await this.getDevicesOnTrack(trackIndex) }));
+  }
+
+  listPluginDevices(trackIndex?: number): Promise<ToolResult> {
+    if (trackIndex !== undefined) trackIndexSchema.parse(trackIndex);
+    return this.read("list_plugin_devices", async () => {
+      const trackNames = (await this.live.query("/live/song/get/track_names")).args.map(String);
+      if (trackIndex !== undefined && trackIndex >= trackNames.length) throw new Error(`Track index ${trackIndex} does not exist.`);
+      const indices = trackIndex === undefined ? trackNames.map((_name, index) => index) : [trackIndex];
+      const tracks = [];
+      let deviceCount = 0;
+      for (const index of indices) {
+        const devices = (await this.getDevicesOnTrack(index)).filter(device => device.className === "PluginDevice");
+        deviceCount += devices.length;
+        tracks.push({ trackIndex: index, trackId: `track:${index}`, trackName: trackNames[index], devices });
+      }
+      return { tracks, deviceCount };
+    });
+  }
+
+  getDeviceParameters(trackIndex: number, deviceIndex: number): Promise<ToolResult> {
+    trackIndexSchema.parse(trackIndex);
+    if (!Number.isInteger(deviceIndex) || deviceIndex < 0) throw new Error("Device index must be a non-negative integer.");
+    return this.read("get_device_parameters", async () => {
+      const device = await this.assertDevice(trackIndex, deviceIndex);
+      return { trackIndex, deviceIndex, device, parameters: await this.getParameterSnapshot(trackIndex, deviceIndex) };
+    });
+  }
+
+  getPluginParameters(trackIndex: number, deviceIndex: number, expectedDeviceName: string): Promise<ToolResult> {
+    if (![trackIndex, deviceIndex].every(value => Number.isInteger(value) && value >= 0)) throw new Error("Track and device indices must be non-negative integers.");
+    return this.read("get_plugin_parameters", async () => {
+      const device = await this.assertPluginDevice(trackIndex, deviceIndex, expectedDeviceName);
+      return { trackIndex, deviceIndex, device, parameters: await this.getParameterSnapshot(trackIndex, deviceIndex) };
+    });
+  }
+
+  findPluginParameter(trackIndex: number, deviceIndex: number, expectedDeviceName: string, query: string, exact = false): Promise<ToolResult> {
+    if (![trackIndex, deviceIndex].every(value => Number.isInteger(value) && value >= 0)) throw new Error("Track and device indices must be non-negative integers.");
+    if (!query.trim()) throw new Error("Parameter query must not be empty.");
+    return this.read("find_plugin_parameter", async () => {
+      const device = await this.assertPluginDevice(trackIndex, deviceIndex, expectedDeviceName);
+      const needle = query.trim().toLocaleLowerCase();
+      const parameters = await this.getParameterSnapshot(trackIndex, deviceIndex);
+      const matches = parameters.filter(parameter => exact ? parameter.name.toLocaleLowerCase() === needle : parameter.name.toLocaleLowerCase().includes(needle));
+      return { trackIndex, deviceIndex, device, query, exact, matched: matches.length, parameters: matches.slice(0, 100), truncated: matches.length > 100 };
+    });
+  }
+
+  async getLiveSet(): Promise<ToolResult> {
+    return this.read("get_live_set", async () => {
+      const version = (await this.live.query("/live/application/get/version")).args;
+      const [transport, signature, scenes, selectedTrack] = await Promise.all([this.getTransport(), this.getTimeSignature(), this.listScenes(), this.getSelectedTrack()]);
+      const tracks = (await this.live.query("/live/song/get/track_names")).args.map((name, index) => ({ index, id: `track:${index}`, name: String(name) }));
+      return { liveVersion: { major: Number(version[0]), minor: Number(version[1]) }, transport: transport.data, timeSignature: signature.data, tracks, scenes: scenes.data, selectedTrack: selectedTrack.data };
+    });
+  }
+
+  async setDeviceParameter(trackIndex: number, deviceIndex: number, parameterIndex: number, value: number, expectedDeviceName: string, dryRun = false): Promise<ToolResult> {
+    if (![trackIndex, deviceIndex, parameterIndex].every(value => Number.isInteger(value) && value >= 0)) throw new Error("Track, device, and parameter indices must be non-negative integers.");
+    if (!Number.isFinite(value)) throw new Error("Parameter value must be finite.");
+    const device = await this.assertDevice(trackIndex, deviceIndex);
+    if (device.name !== expectedDeviceName) throw new Error(`Device safeguard failed: expected ${expectedDeviceName}, found ${device.name}.`);
+    return this.mutate("set_device_parameter", { trackIndex, deviceIndex, parameterIndex, value, expectedDeviceName, dryRun }, [{ address: "/live/device/set/parameter/value", args: [oscInt(trackIndex), oscInt(deviceIndex), oscInt(parameterIndex), oscFloat(value)] }], dryRun, async () => {
+      const reply = await this.live.query("/live/device/get/parameter/value", [oscInt(trackIndex), oscInt(deviceIndex), oscInt(parameterIndex)]);
+      const actual = Number(last(reply.args));
+      if (Math.abs(actual - value) > 0.0001) throw new Error(`Parameter verification failed: expected ${value}, received ${actual}.`);
+      return { trackIndex, deviceIndex, parameterIndex, value: actual, deviceName: device.name };
+    });
+  }
+
+  async setPluginParameter(input: { trackIndex: number; deviceIndex: number; expectedDeviceName: string; parameterName: string; parameterIndex?: number; normalizedValue: number; dryRun?: boolean }): Promise<ToolResult> {
+    const { trackIndex, deviceIndex, expectedDeviceName, parameterName, parameterIndex, normalizedValue, dryRun = false } = input;
+    if (![trackIndex, deviceIndex].every(value => Number.isInteger(value) && value >= 0)) throw new Error("Track and device indices must be non-negative integers.");
+    if (parameterIndex !== undefined && (!Number.isInteger(parameterIndex) || parameterIndex < 0)) throw new Error("Parameter index must be a non-negative integer.");
+    if (!parameterName.trim()) throw new Error("Parameter name must not be empty.");
+    if (!Number.isFinite(normalizedValue) || normalizedValue < 0 || normalizedValue > 1) throw new Error("Normalized value must be between 0 and 1.");
+    const device = await this.assertPluginDevice(trackIndex, deviceIndex, expectedDeviceName);
+    const parameters = await this.getParameterSnapshot(trackIndex, deviceIndex);
+    const parameter = this.resolveParameter(parameters, parameterName, parameterIndex);
+    const requestedValue = parameter.minimum + normalizedValue * (parameter.maximum - parameter.minimum);
+    const operation = { address: "/live/device/set/parameter/value", args: [oscInt(trackIndex), oscInt(deviceIndex), oscInt(parameter.index), oscFloat(requestedValue)] };
+    return this.mutate("set_plugin_parameter", { ...input, dryRun }, [operation], dryRun, async () => {
+      const args = [oscInt(trackIndex), oscInt(deviceIndex), oscInt(parameter.index)];
+      const [valueReply, displayReply] = await Promise.all([
+        this.live.query("/live/device/get/parameter/value", args),
+        this.live.query("/live/device/get/parameter/value_string", args)
+      ]);
+      const actualValue = Number(last(valueReply.args));
+      if (!Number.isFinite(actualValue) || actualValue < parameter.minimum - 0.0001 || actualValue > parameter.maximum + 0.0001) throw new Error(`Plugin parameter read-back failed for ${parameter.name}.`);
+      const actualNormalizedValue = parameter.maximum === parameter.minimum ? 0 : (actualValue - parameter.minimum) / (parameter.maximum - parameter.minimum);
+      return {
+        trackIndex, deviceIndex, deviceName: device.name, className: device.className,
+        parameterIndex: parameter.index, parameterName: parameter.name,
+        previousValue: parameter.value, previousNormalizedValue: parameter.normalizedValue, previousDisplayValue: parameter.displayValue,
+        requestedValue, requestedNormalizedValue: normalizedValue,
+        value: actualValue, normalizedValue: actualNormalizedValue, displayValue: String(last(displayReply.args)),
+        quantized: Math.abs(actualValue - requestedValue) > 0.0001
+      };
+    });
+  }
+
+  private async assertTrack(trackIndex: number): Promise<string> {
+    const names = (await this.live.query("/live/song/get/track_names")).args.map(String);
+    if (trackIndex >= names.length) throw new Error(`Track index ${trackIndex} does not exist.`);
+    return names[trackIndex];
+  }
+
+  private async assertDevice(trackIndex: number, deviceIndex: number): Promise<{ name: string; className: string }> {
+    await this.assertTrack(trackIndex);
+    const args = [oscInt(trackIndex), oscInt(deviceIndex)];
+    const [name, className] = await Promise.all([this.live.query("/live/device/get/name", args), this.live.query("/live/device/get/class_name", args)]);
+    return { name: String(last(name.args)), className: String(last(className.args)) };
+  }
+
+  private async assertPluginDevice(trackIndex: number, deviceIndex: number, expectedDeviceName: string): Promise<{ name: string; className: string }> {
+    const device = await this.assertDevice(trackIndex, deviceIndex);
+    if (device.name !== expectedDeviceName) throw new Error(`Device safeguard failed: expected ${expectedDeviceName}, found ${device.name}.`);
+    if (device.className !== "PluginDevice") throw new Error(`Device '${device.name}' is not a third-party plugin device.`);
+    return device;
+  }
+
+  private async getDevicesOnTrack(trackIndex: number): Promise<DeviceDescriptor[]> {
+    await this.assertTrack(trackIndex);
+    const arg = [oscInt(trackIndex)];
+    const [names, types, classes] = await Promise.all([
+      this.live.query("/live/track/get/devices/name", arg), this.live.query("/live/track/get/devices/type", arg), this.live.query("/live/track/get/devices/class_name", arg)
+    ]);
+    return names.args.slice(1).map((name, index) => ({ index, id: `device:${trackIndex}:${index}`, name: String(name), type: Number(types.args[index + 1]), className: String(classes.args[index + 1]) }));
+  }
+
+  private async getParameterSnapshot(trackIndex: number, deviceIndex: number): Promise<DeviceParameterDescriptor[]> {
+    const args = [oscInt(trackIndex), oscInt(deviceIndex)];
+    const [names, values, minimums, maximums, displays] = await Promise.all([
+      this.live.query("/live/device/get/parameters/name", args), this.live.query("/live/device/get/parameters/value", args),
+      this.live.query("/live/device/get/parameters/min", args), this.live.query("/live/device/get/parameters/max", args),
+      this.live.query("/live/device/get/parameters/value_string", args)
+    ]);
+    const nameList = names.args.slice(2); const valueList = values.args.slice(2); const minList = minimums.args.slice(2); const maxList = maximums.args.slice(2); const displayList = displays.args.slice(2);
+    const parameters: DeviceParameterDescriptor[] = [];
+    for (let index = 0; index < nameList.length; index++) {
+      const value = Number(valueList[index]); const minimum = Number(minList[index]); const maximum = Number(maxList[index]);
+      parameters.push({ index, id: `parameter:${trackIndex}:${deviceIndex}:${index}`, name: String(nameList[index]), value, normalizedValue: maximum === minimum ? 0 : (value - minimum) / (maximum - minimum), minimum, maximum, displayValue: String(displayList[index]), enabled: null });
+    }
+    return parameters;
+  }
+
+  private resolveParameter(parameters: DeviceParameterDescriptor[], parameterName: string, parameterIndex?: number): DeviceParameterDescriptor {
+    const target = parameterName.trim().toLocaleLowerCase();
+    if (parameterIndex !== undefined) {
+      const parameter = parameters[parameterIndex];
+      if (!parameter) throw new Error(`Parameter index ${parameterIndex} does not exist.`);
+      if (parameter.name.toLocaleLowerCase() !== target) throw new Error(`Parameter safeguard failed: expected '${parameterName}', found '${parameter.name}' at index ${parameterIndex}.`);
+      return parameter;
+    }
+    const matches = parameters.filter(parameter => parameter.name.toLocaleLowerCase() === target);
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) throw new Error(`Multiple parameters are named '${parameterName}'; provide parameterIndex.`);
+    throw new Error(`Plugin parameter '${parameterName}' was not found.`);
+  }
+}

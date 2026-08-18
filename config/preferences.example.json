@@ -1,0 +1,15 @@
+{
+  "preferredBpmRanges": [{ "genre": "electronic", "min": 124, "max": 132 }],
+  "commonKeys": ["C minor"],
+  "favoriteSampleFolders": [],
+  "preferredSamples": { "kicks": [], "claps": [], "snares": [], "hats": [] },
+  "preferredTemplates": [],
+  "preferredSerumTrackTemplates": [],
+  "defaultTrackOrder": ["Drums", "Bass", "Chords", "Leads", "Vocals", "FX", "Returns", "Reference"],
+  "arrangement": { "bpm": 128, "sections": [
+    { "name": "Intro", "bars": 16 }, { "name": "Build", "bars": 16 },
+    { "name": "Drop", "bars": 16 }, { "name": "Breakdown", "bars": 16 },
+    { "name": "Second Build", "bars": 16 }, { "name": "Final Drop", "bars": 32 },
+    { "name": "Outro", "bars": 16 }
+  ] }
+}

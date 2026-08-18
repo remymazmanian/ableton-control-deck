@@ -1,0 +1,43 @@
+{
+  "name": "ableton-control-deck",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Ableton Control Deck: an MCP bridge for exact, read-back-verified Ableton Live control, with a local status dashboard",
+  "author": "Remy Mazmanian",
+  "license": "MIT",
+  "bin": {
+    "ableton-control-deck": "dist/src/index.js"
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "start": "node dist/src/index.js",
+    "dev": "tsx src/index.ts",
+    "setup": "node scripts/setup.mjs",
+    "health": "tsx src/health.ts",
+    "dashboard:api": "node src/dashboard-server.mjs",
+    "samples:index": "tsx src/index-samples.ts",
+    "index:plugins": "node src/plugin-index.mjs",
+    "build:macos": "zsh macos/build-app.sh",
+    "build:omnihost": "node max-for-live/build-device.mjs",
+    "install:omnihost": "zsh scripts/install-omnihost.sh",
+    "check": "tsc -p tsconfig.json --noEmit && node --check scripts/setup.mjs && node --check src/dashboard-server.mjs && node --check src/plugin-index.mjs",
+    "test": "vitest run",
+    "test:bridge": "python3 -B -m unittest discover -s remote-script/tests -p 'test_*.py'",
+    "test:integration": "ABLETON_INTEGRATION=1 vitest run tests/integration.test.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.17.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}
