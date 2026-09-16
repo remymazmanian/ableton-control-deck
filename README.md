@@ -1,5 +1,9 @@
 # Ableton Control Deck
 
+Tell an AI what to change in Ableton Live. Control Deck does it on your Mac, then checks Live actually did it.
+
+![Control Deck dashboard](docs/dashboard.png)
+
 Ableton Control Deck is a local [MCP](https://modelcontextprotocol.io) bridge for Ableton Live. It gives any MCP client — Claude Code, Claude Desktop, Codex, or anything else that speaks MCP — exact, read-back-verified control of Live tracks, clips, transport, devices, and third-party plug-in parameters, plus a local status dashboard.
 
 Everything runs on your machine and binds only to loopback addresses. Nothing is published or exposed to the network.
