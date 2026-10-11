@@ -1,0 +1,25 @@
+# Changelog
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [1.0.0] - 2026-08-18
+
+First release of Ableton Control Deck, a local MCP bridge that lets an AI agent control Ableton Live on your Mac and checks its changes against what Live reports. It needs macOS 13 or newer, Ableton Live 11 or newer and Node.js 20 or newer.
+
+### Added
+
+- One-step installer, `Install Ableton Control Deck.command`, that sets up the bridge, the Live remote script and the background services, then opens a connection guide. It is safe to run again at any time.
+- Transport control for play, stop, continue, tempo, time signature, song position, metronome and Arrangement recording, with each change read back from Live.
+- Track tools to list, create, rename and delete MIDI and audio tracks. Deleting a track needs an explicit confirmation, and most changes can first be run as a dry run that reports what would happen without touching Live.
+- Session View MIDI clips with validated note content, plus read access to the Live Set, scenes, clips, the current selection, devices and every parameter Live exposes.
+- Plug-in and device loading by exact Browser name on an exact track, for VST3, VST2 and Audio Unit plug-ins and for native Live devices such as Drum Rack, Echo and Reverb. Ambiguous names are refused.
+- Third-party plug-in parameters read and set with normalized values and read-back.
+- Control Deck OmniHost, an optional Max for Live device that hosts a VST3 instrument and exposes its full parameter list, beyond what Live's device panel shows. The included device is set up for Arturia Mini V4.
+- Sample search over an optional local index of an external sample drive, by keyword, folder, BPM, key, duration, one-shot or loop, and tags. The indexer never copies, moves or changes your audio files.
+- Local dashboard at `http://127.0.0.1:50713` showing bridge health, the current Live session, the selected track's devices and a searchable inventory of installed plug-ins. Its Connect page has copy-paste setup guides for Claude Code, Codex, Cursor, VS Code, Gemini CLI, local LLM setups and other MCP clients.
+- Local operation: the Live bridge, status service and dashboard listen on this Mac only, requests to the Live bridge must carry a secret generated for your install, and requests are logged locally to `logs/control-deck.jsonl`.
+
+[Unreleased]: https://github.com/remymazmanian/ableton-control-deck/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/remymazmanian/ableton-control-deck/releases/tag/v1.0.0
