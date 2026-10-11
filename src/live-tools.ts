@@ -288,6 +288,115 @@ export class LiveTools {
     });
   }
 
+  private async cuePoints(): Promise<Array<{ name: string; timeBeats: number }>> {
+    const values = (await this.live.query("/live/song/get/cue_points")).args;
+    const cues = [];
+    for (let i = 0; i + 1 < values.length; i += 2) cues.push({ name: String(values[i]), timeBeats: Number(values[i + 1]) });
+    return cues.sort((a, b) => a.timeBeats - b.timeBeats);
+  }
+
+  private async arrangementClips(trackIndex: number): Promise<Array<{ name: string; startBeats: number; endBeats: number }>> {
+    const values = (await this.live.query("/live/track/get/arrangement_clips", [oscInt(trackIndex)])).args.slice(1);
+    const clips = [];
+    for (let i = 0; i + 2 < values.length; i += 3) clips.push({ name: String(values[i]), startBeats: Number(values[i + 1]), endBeats: Number(values[i + 2]) });
+    return clips;
+  }
+
+  listLocators(): Promise<ToolResult> {
+    return this.read("list_locators", async () => ({ locators: await this.cuePoints() }));
+  }
+
+  private hasCueAt(cues: Array<{ timeBeats: number }>, timeBeats: number): boolean {
+    return cues.some(cue => Math.abs(cue.timeBeats - timeBeats) < 0.001);
+  }
+
+  private async waitForCue(timeBeats: number, present: boolean): Promise<Array<{ name: string; timeBeats: number }>> {
+    let cues = await this.cuePoints();
+    for (let attempt = 0; attempt < 10 && this.hasCueAt(cues, timeBeats) !== present; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 75));
+      cues = await this.cuePoints();
+    }
+    if (this.hasCueAt(cues, timeBeats) !== present) throw new Error(`Locator at ${timeBeats} beats is ${present ? "missing" : "still present"}.`);
+    return cues;
+  }
+
+  /**
+   * Live adds and removes a locator at the playhead, and applies a playhead move
+   * on its next tick. Move the playhead, wait until Live reports it there, run
+   * the change, then put the playhead back where it was.
+   */
+  private async withPlayheadAt<T>(timeBeats: number, run: () => Promise<T>): Promise<T> {
+    if (bool(await this.songValue("is_playing"))) throw new Error("Stop playback first: Live adds and removes locators at the playhead, which moves while playing.");
+    const previous = Number(await this.songValue("current_song_time"));
+    const moveTo = async (beats: number) => {
+      if (Math.abs(Number(await this.songValue("current_song_time")) - beats) < 0.001) return;
+      await this.live.send("/live/song/set/current_song_time", [oscFloat(beats)]);
+      await this.waitForSongValue("current_song_time", beats);
+    };
+    await moveTo(timeBeats);
+    try {
+      return await run();
+    } finally {
+      await moveTo(previous).catch(() => undefined);
+    }
+  }
+
+  async addLocator(timeBeats: number, name: string, dryRun = false): Promise<ToolResult> {
+    if (!Number.isFinite(timeBeats) || timeBeats < 0) throw new Error("Locator time must be a non-negative number of beats.");
+    if (!name.trim()) throw new Error("Locator name must not be empty.");
+    const create = { address: "/live/song/create_cue_point", args: [oscFloat(timeBeats)] };
+    const rename = { address: "/live/cue_point/set_name", args: [oscFloat(timeBeats), name] };
+    if (dryRun || this.defaultDryRun) return this.mutate("add_locator", { timeBeats, name, dryRun }, [create, rename], true, async () => ({}));
+    const confirmName = async () => {
+      const cue = (await this.cuePoints()).find(item => Math.abs(item.timeBeats - timeBeats) < 0.001);
+      if (!cue || cue.name !== name) throw new Error(`Locator verification failed at ${timeBeats} beats.`);
+      return cue;
+    };
+    // An existing locator is only renamed, so the playhead never needs to move.
+    if (this.hasCueAt(await this.cuePoints(), timeBeats)) return this.mutate("add_locator", { timeBeats, name }, [rename], false, confirmName);
+    return this.withPlayheadAt(timeBeats, () => this.mutate("add_locator", { timeBeats, name }, [create], false, async () => {
+      await this.waitForCue(timeBeats, true);
+      await this.live.send(rename.address, rename.args);
+      return confirmName();
+    }));
+  }
+
+  async deleteLocator(timeBeats: number, dryRun = false): Promise<ToolResult> {
+    const operation = { address: "/live/song/delete_cue_point", args: [oscFloat(timeBeats)] };
+    if (dryRun || this.defaultDryRun) return this.mutate("delete_locator", { timeBeats, dryRun }, [operation], true, async () => ({}));
+    if (!this.hasCueAt(await this.cuePoints(), timeBeats)) throw new Error(`No locator at ${timeBeats} beats. List them with list_locators.`);
+    return this.withPlayheadAt(timeBeats, () => this.mutate("delete_locator", { timeBeats }, [operation], false, async () => ({ deletedAtBeats: timeBeats, locators: await this.waitForCue(timeBeats, false) })));
+  }
+
+  listArrangementClips(trackIndex: number): Promise<ToolResult> {
+    trackIndexSchema.parse(trackIndex);
+    return this.read("list_arrangement_clips", async () => ({ trackIndex, trackName: await this.assertTrack(trackIndex), clips: await this.arrangementClips(trackIndex) }));
+  }
+
+  async placeClipInArrangement(input: { trackIndex: number; sceneIndex: number; startBeats: number; endBeats: number; dryRun?: boolean }): Promise<ToolResult> {
+    const { trackIndex, sceneIndex, startBeats, endBeats, dryRun = false } = input;
+    trackIndexSchema.parse(trackIndex);
+    if (!Number.isInteger(sceneIndex) || sceneIndex < 0) throw new Error("Scene index must be a non-negative integer.");
+    if (!(startBeats >= 0) || !(endBeats > startBeats)) throw new Error("endBeats must be greater than startBeats (both >= 0).");
+    const before = dryRun ? 0 : (await this.arrangementClips(trackIndex)).length;
+    return this.mutate("place_clip_in_arrangement", input, [{ address: "/live/clip/fill_arrangement", args: [oscInt(trackIndex), oscInt(sceneIndex), oscFloat(startBeats), oscFloat(endBeats)] }], dryRun, async () => {
+      const clips = await this.arrangementClips(trackIndex);
+      const placed = clips.filter(clip => clip.startBeats >= startBeats - 0.001 && clip.startBeats < endBeats - 0.001);
+      if (clips.length <= before || placed.length === 0) throw new Error("Live did not confirm the arrangement clips.");
+      return { trackIndex, sceneIndex, startBeats, endBeats, copiesInRange: placed.length, lastEndBeats: Math.max(...placed.map(clip => clip.endBeats)) };
+    });
+  }
+
+  clearArrangementTrack(trackIndex: number, confirm: boolean, dryRun = false): Promise<ToolResult> {
+    trackIndexSchema.parse(trackIndex);
+    if (!confirm && !dryRun) throw new Error("clear_arrangement_track requires confirm=true.");
+    return this.mutate("clear_arrangement_track", { trackIndex, confirm, dryRun }, [{ address: "/live/track/clear_arrangement", args: [oscInt(trackIndex), true] }], dryRun, async () => {
+      const clips = await this.arrangementClips(trackIndex);
+      if (clips.length) throw new Error(`${clips.length} arrangement clips remain on track ${trackIndex}.`);
+      return { trackIndex, cleared: true };
+    });
+  }
+
   private async assertTrack(trackIndex: number): Promise<string> {
     const names = (await this.live.query("/live/song/get/track_names")).args.map(String);
     if (trackIndex >= names.length) throw new Error(`Track index ${trackIndex} does not exist.`);

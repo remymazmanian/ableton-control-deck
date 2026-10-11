@@ -11,3 +11,5 @@ config/sample-library.json
 .env
 .DS_Store
 build/
+__pycache__/
+*.pyc

@@ -19,7 +19,7 @@ const local = new LocalCapabilities();
 const plugins = new PluginTools(ableton, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
 const omnihostClient = new OmnihostClient();
 const omnihost = new OmnihostTools(omnihostClient, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
-const server = new McpServer({ name: "ableton-control-deck", version: "1.0.0" });
+const server = new McpServer({ name: "ableton-control-deck", version: "1.1.0" });
 const response = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }], structuredContent: value as Record<string, unknown> });
 
 server.tool("ableton_status", "Check the Control Deck Bridge connection and return Live status.", {}, async () => response(await commands.status()));
@@ -87,6 +87,15 @@ server.tool("set_song_position", "Set the transport position in beats and verify
 server.tool("toggle_metronome", "Toggle and verify the metronome.", { dryRun: z.boolean().default(false) }, async ({ dryRun }) => response(await live.toggleMetronome(dryRun)));
 server.tool("start_recording", "Enable Arrangement recording and verify it.", { dryRun: z.boolean().default(false) }, async ({ dryRun }) => response(await live.setRecording(true, dryRun)));
 server.tool("stop_recording", "Disable Arrangement recording and verify it.", { dryRun: z.boolean().default(false) }, async ({ dryRun }) => response(await live.setRecording(false, dryRun)));
+
+server.tool("list_locators", "List Arrangement locators (cue points) with their positions in beats.", {}, async () => response(await live.listLocators()));
+server.tool("add_locator", "Create (or rename) an Arrangement locator at an exact beat position and verify its name. Playback must be stopped; the playhead is returned to where it was.", { timeBeats: z.number().min(0), name: z.string().min(1), dryRun: z.boolean().default(false) }, async ({ timeBeats, name, dryRun }) => response(await live.addLocator(timeBeats, name, dryRun)));
+server.tool("delete_locator", "Delete the Arrangement locator at an exact beat position. Playback must be stopped; the playhead is returned to where it was.", { timeBeats: z.number().min(0), dryRun: z.boolean().default(false) }, async ({ timeBeats, dryRun }) => response(await live.deleteLocator(timeBeats, dryRun)));
+server.tool("list_arrangement_clips", "List Arrangement View clips on a track with start/end in beats.", { trackIndex: z.number().int().min(0) }, async ({ trackIndex }) => response(await live.listArrangementClips(trackIndex)));
+server.tool("place_clip_in_arrangement", "Copy a Session View clip (MIDI or audio) into the Arrangement, tiled back-to-back from startBeats until endBeats, and verify. Each copy is the full clip, so the last one can run past endBeats. At most 512 copies.", {
+  trackIndex: z.number().int().min(0), sceneIndex: z.number().int().min(0), startBeats: z.number().min(0), endBeats: z.number().positive(), dryRun: z.boolean().default(false)
+}, async input => response(await live.placeClipInArrangement(input)));
+server.tool("clear_arrangement_track", "Delete every Arrangement clip on one track. confirm=true is mandatory.", { trackIndex: z.number().int().min(0), confirm: z.boolean().default(false), dryRun: z.boolean().default(false) }, async ({ trackIndex, confirm, dryRun }) => response(await live.clearArrangementTrack(trackIndex, confirm, dryRun)));
 
 server.tool("search_samples", "Search the local SQLite sample index by text and musical metadata.", {
   keywords: z.string().optional(), folder: z.string().optional(), sampleType: z.string().optional(), bpmMin: z.number().optional(), bpmMax: z.number().optional(), musicalKey: z.string().optional(), durationMin: z.number().min(0).optional(), durationMax: z.number().min(0).optional(), kind: z.enum(["one-shot", "loop", "unknown"]).optional(), favoritesOnly: z.boolean().optional(), tags: z.array(z.string()).optional(), limit: z.number().int().min(1).max(200).optional()

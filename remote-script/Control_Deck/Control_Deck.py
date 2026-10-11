@@ -14,7 +14,7 @@ from .bridge_core import BridgeError, filter_plugins, format_from_path, public_p
 
 
 SCRIPT_NAME = "Control Deck Bridge"
-SCRIPT_VERSION = "1.0.0"
+SCRIPT_VERSION = "1.1.0"
 PROTOCOL = "ableton-control-deck/1"
 HOST = "127.0.0.1"
 PORT = 50711
@@ -180,7 +180,16 @@ class ControlDeckBridge(ControlSurface):
         address, args = self._live_request(params)
         song = self.song()
 
-        if address == "/live/application/get/version":
+        if address == "/live/song/get/cue_points":
+            values = []
+            for cue in song.cue_points:
+                values.extend([cue.name, cue.time])
+        elif address == "/live/track/get/arrangement_clips":
+            track_index, track = self._track(args)
+            values = [track_index]
+            for clip in track.arrangement_clips:
+                values.extend([clip.name, clip.start_time, clip.end_time])
+        elif address == "/live/application/get/version":
             application = self.application()
             values = [application.get_major_version(), application.get_minor_version()]
         elif address == "/live/song/get/track_names":
@@ -320,9 +329,67 @@ class ControlDeckBridge(ControlSurface):
             self._require_args(args, 1, address)
             _track_index, track = self._track(args)
             song.view.selected_track = track
+        elif address == "/live/clip/fill_arrangement":
+            # args: track, scene, start_beats, end_beats -> tile the Session clip across [start, end)
+            self._require_args(args, 4, address)
+            _track_index, track = self._track(args)
+            _t, _s, slot = self._clip_slot(args)
+            if not slot.has_clip:
+                raise BridgeError("CLIP_NOT_FOUND", "No Session clip to place at that track/scene")
+            start, end = float(args[2]), float(args[3])
+            step = float(slot.clip.length)
+            if step <= 0 or end <= start:
+                raise BridgeError("INVALID_RANGE", "End must be after start and the clip must have length")
+            if (end - start) / step > 512:
+                raise BridgeError("INVALID_RANGE", "Range would need more than 512 clip copies")
+            position = start
+            while position < end - 0.0001:
+                track.duplicate_clip_to_arrangement(slot.clip, position)
+                position += step
+        elif address == "/live/track/clear_arrangement":
+            self._require_args(args, 2, address)
+            _track_index, track = self._track(args)
+            if args[1] is not True:
+                raise BridgeError("CONFIRM_REQUIRED", "clear_arrangement requires confirm=true")
+            for clip in list(track.arrangement_clips):
+                track.delete_clip(clip)
+        elif address == "/live/song/create_cue_point":
+            self._require_args(args, 1, address)
+            time_beats = float(args[0])
+            if self._cue_at(time_beats) is None:
+                self._require_playhead_at(time_beats)
+                song.set_or_delete_cue()
+        elif address == "/live/cue_point/set_name":
+            self._require_args(args, 2, address)
+            cue = self._cue_at(float(args[0]))
+            if cue is None:
+                raise BridgeError("CUE_NOT_FOUND", "No locator at %s beats" % args[0])
+            cue.name = str(args[1])
+        elif address == "/live/song/delete_cue_point":
+            self._require_args(args, 1, address)
+            time_beats = float(args[0])
+            if self._cue_at(time_beats) is not None:
+                self._require_playhead_at(time_beats)
+                song.set_or_delete_cue()
         else:
             raise BridgeError("ADDRESS_NOT_ALLOWED", "Unsupported Live mutation: %s" % address)
         return {"address": address, "completed": True}
+
+    def _require_playhead_at(self, time_beats):
+        # set_or_delete_cue toggles a locator wherever the playhead is, and Live
+        # applies a playhead move on its next tick. Acting before the move lands,
+        # or while playing, would add or remove a locator somewhere else.
+        song = self.song()
+        if song.is_playing:
+            raise BridgeError("STOP_PLAYBACK", "Stop playback before adding or deleting a locator")
+        if abs(float(song.current_song_time) - time_beats) >= 0.001:
+            raise BridgeError("PLAYHEAD_NOT_READY", "Move the playhead to %s beats first" % time_beats)
+
+    def _cue_at(self, time_beats):
+        for cue in self.song().cue_points:
+            if abs(float(cue.time) - time_beats) < 0.001:
+                return cue
+        return None
 
     def _live_request(self, params):
         address = str(params.get("address", "")).strip()

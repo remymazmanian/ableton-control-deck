@@ -4,6 +4,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-11
+
+Adds Arrangement tools: locators and clips. Tested with Ableton Live 12.4.6. After updating, restart Live so it loads the new remote script.
+
+### Added
+
+- `list_locators`, `add_locator` and `delete_locator` for Arrangement locators (cue points). Adding a locator at a position that already has one renames it. Live adds and removes locators at the playhead, so these need playback stopped. They move the playhead, wait until Live confirms it's there, make the change, then put the playhead back.
+- `list_arrangement_clips` lists a track's Arrangement clips with start and end in beats.
+- `place_clip_in_arrangement` copies a Session View clip into the Arrangement, tiled back to back over a beat range, and confirms the copies. Each copy is the full clip, so the last one can run past the end of the range. It refuses ranges that would need more than 512 copies.
+- `clear_arrangement_track` deletes every Arrangement clip on one track. It needs `confirm=true`.
+- Tests for the new tools, `SECURITY.md`, and CI that type-checks, checks the remote script compiles, and runs the tests on every push and pull request.
+
 ## [1.0.0] - 2026-08-18
 
 First release of Ableton Control Deck, a local MCP bridge that lets an AI agent control Ableton Live on your Mac and checks its changes against what Live reports. It needs macOS 13 or newer, Ableton Live 11 or newer and Node.js 20 or newer.
@@ -21,5 +33,6 @@ First release of Ableton Control Deck, a local MCP bridge that lets an AI agent 
 - Local dashboard at `http://127.0.0.1:50713` showing bridge health, the current Live session, the selected track's devices and a searchable inventory of installed plug-ins. Its Connect page has copy-paste setup guides for Claude Code, Codex, Cursor, VS Code, Gemini CLI, local LLM setups and other MCP clients.
 - Local operation: the Live bridge, status service and dashboard listen on this Mac only, requests to the Live bridge must carry a secret generated for your install, and requests are logged locally to `logs/control-deck.jsonl`.
 
-[Unreleased]: https://github.com/remymazmanian/ableton-control-deck/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/remymazmanian/ableton-control-deck/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/remymazmanian/ableton-control-deck/releases/tag/v1.1.0
 [1.0.0]: https://github.com/remymazmanian/ableton-control-deck/releases/tag/v1.0.0

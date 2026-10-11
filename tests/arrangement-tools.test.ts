@@ -1,0 +1,106 @@
+import { describe, expect, it, vi } from "vitest";
+import { LiveTools } from "../src/live-tools.js";
+
+const logger = { write: vi.fn() };
+
+/** A small stand-in for Live: locators, the playhead, transport and Arrangement clips. */
+function fakeLive(state: { cues?: Array<[string, number]>; playhead?: number; playing?: boolean; clips?: Array<[string, number, number]>; sessionClipLength?: number } = {}) {
+  const live = {
+    cues: [...(state.cues ?? [])],
+    playhead: state.playhead ?? 0,
+    playing: state.playing ?? false,
+    clips: [...(state.clips ?? [])],
+    sent: [] as string[],
+    send: vi.fn(async (address: string, args: unknown[] = []) => {
+      live.sent.push(address);
+      // Arguments arrive as typed OSC values or, for strings, as plain values.
+      const v = args.map(a => (a !== null && typeof a === "object" && "value" in a ? (a as { value: unknown }).value : a));
+      if (address === "/live/song/set/current_song_time") live.playhead = Number(v[0]);
+      if (address === "/live/song/create_cue_point" && Math.abs(live.playhead - Number(v[0])) < 0.001) live.cues.push(["", Number(v[0])]);
+      if (address === "/live/song/delete_cue_point") live.cues = live.cues.filter(([, t]) => Math.abs(t - Number(v[0])) >= 0.001 || Math.abs(live.playhead - t) >= 0.001);
+      if (address === "/live/cue_point/set_name") live.cues = live.cues.map(([n, t]) => [Math.abs(t - Number(v[0])) < 0.001 ? String(v[1]) : n, t]);
+      if (address === "/live/track/clear_arrangement") live.clips = [];
+      if (address === "/live/clip/fill_arrangement") {
+        const step = state.sessionClipLength ?? 4;
+        for (let p = Number(v[2]); p < Number(v[3]) - 0.0001; p += step) live.clips.push(["Loop", p, p + step]);
+      }
+    }),
+    query: vi.fn(async (address: string) => {
+      if (address === "/live/song/get/cue_points") return { args: live.cues.flat() };
+      if (address === "/live/song/get/current_song_time") return { args: [live.playhead] };
+      if (address === "/live/song/get/is_playing") return { args: [live.playing] };
+      if (address === "/live/song/get/track_names") return { args: ["Drums", "Bass"] };
+      if (address === "/live/track/get/arrangement_clips") return { args: [0, ...live.clips.flat()] };
+      return { args: [] };
+    })
+  };
+  return live;
+}
+
+describe("locators", () => {
+  it("lists locators sorted by position", async () => {
+    const live = fakeLive({ cues: [["Drop", 64], ["Intro", 0]] });
+    const result = await new LiveTools(live as never, logger as never).listLocators();
+    expect(result).toMatchObject({ ok: true, data: { locators: [{ name: "Intro", timeBeats: 0 }, { name: "Drop", timeBeats: 64 }] } });
+  });
+
+  it("adds and names a locator, then puts the playhead back", async () => {
+    const live = fakeLive({ playhead: 12 });
+    const result = await new LiveTools(live as never, logger as never).addLocator(32, "Chorus");
+    expect(result).toMatchObject({ ok: true, data: { name: "Chorus", timeBeats: 32 } });
+    expect(live.cues).toEqual([["Chorus", 32]]);
+    expect(live.playhead).toBe(12);
+  });
+
+  it("only renames an existing locator, without moving the playhead", async () => {
+    const live = fakeLive({ cues: [["Old", 16]], playhead: 4 });
+    const result = await new LiveTools(live as never, logger as never).addLocator(16, "Verse");
+    expect(result).toMatchObject({ ok: true, data: { name: "Verse" } });
+    expect(live.sent).not.toContain("/live/song/set/current_song_time");
+    expect(live.sent).not.toContain("/live/song/create_cue_point");
+  });
+
+  it("refuses to add a locator while playing, and sends nothing", async () => {
+    const live = fakeLive({ playing: true });
+    await expect(new LiveTools(live as never, logger as never).addLocator(8, "Break")).rejects.toThrow(/Stop playback/);
+    expect(live.send).not.toHaveBeenCalled();
+  });
+
+  it("deletes only the requested locator and puts the playhead back", async () => {
+    const live = fakeLive({ cues: [["A", 0], ["B", 16]], playhead: 40 });
+    const result = await new LiveTools(live as never, logger as never).deleteLocator(16);
+    expect(result).toMatchObject({ ok: true, data: { deletedAtBeats: 16 } });
+    expect(live.cues).toEqual([["A", 0]]);
+    expect(live.playhead).toBe(40);
+  });
+
+  it("reports a missing locator instead of toggling one into existence", async () => {
+    const live = fakeLive({ cues: [["A", 0]] });
+    await expect(new LiveTools(live as never, logger as never).deleteLocator(8)).rejects.toThrow(/No locator at 8/);
+    expect(live.send).not.toHaveBeenCalled();
+  });
+});
+
+describe("arrangement clips", () => {
+  it("tiles a Session clip across a range and reports the copies", async () => {
+    const live = fakeLive({ sessionClipLength: 4 });
+    const result = await new LiveTools(live as never, logger as never).placeClipInArrangement({ trackIndex: 0, sceneIndex: 1, startBeats: 0, endBeats: 16 });
+    expect(result).toMatchObject({ ok: true, data: { copiesInRange: 4, lastEndBeats: 16 } });
+  });
+
+  it("rejects a range that ends before it starts", async () => {
+    const live = fakeLive();
+    await expect(new LiveTools(live as never, logger as never).placeClipInArrangement({ trackIndex: 0, sceneIndex: 0, startBeats: 8, endBeats: 8 })).rejects.toThrow(/endBeats/);
+    expect(live.send).not.toHaveBeenCalled();
+  });
+
+  it("requires confirm=true to clear a track's Arrangement", async () => {
+    const live = fakeLive({ clips: [["Loop", 0, 4]] });
+    const tools = new LiveTools(live as never, logger as never);
+    expect(() => tools.clearArrangementTrack(0, false)).toThrow(/confirm=true/);
+    expect(live.send).not.toHaveBeenCalled();
+    const result = await tools.clearArrangementTrack(0, true);
+    expect(result).toMatchObject({ ok: true, data: { cleared: true } });
+    expect(live.clips).toEqual([]);
+  });
+});

@@ -39,6 +39,8 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 - Read and set third-party plug-in parameters with normalized values and readback
 - Control a fully indexed VST3 instrument through OmniHost, past Live's parameter ceiling
 - Search a local sample index by keyword, folder, BPM, key, duration, and tags
+- List, add, rename, and delete Arrangement locators; adding or deleting one needs playback stopped and puts the playhead back afterwards
+- List a track's Arrangement clips, tile a Session clip into the Arrangement over a beat range, and clear a track's Arrangement (confirmation required)
 
 ## Requirements
 
