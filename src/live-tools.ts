@@ -1,7 +1,8 @@
 import { findCreatedMidiClip, MAX_ARRANGEMENT_BEATS, MAX_NOTES_PER_CALL, notesStartingInRange, parseArrangementClips, parseArrangementNotes, resolveArrangementClip, verifyAddedNotes, verifyModifiedNotes, verifyRemovedNotes, type ArrangementClipDescriptor, type ArrangementNote } from "./arrangement-clips.js";
 import { JsonLogger } from "./logger.js";
 import { oscFloat, oscInt, type LiveControlClient, type OscArgument, type ToolResult } from "./types.js";
-import { noteNameToMidi, trackIndexSchema, validateNotes } from "./validation.js";
+import { parseNoteReply } from "./notes.js";
+import { noteNameToMidi, sceneIndexSchema, trackIndexSchema, validateNotes } from "./validation.js";
 
 const bool = (value: unknown) => value === true || value === 1;
 const last = (values: unknown[]) => values.at(-1);
@@ -182,6 +183,19 @@ export class LiveTools {
         tracks.push({ trackIndex: index, trackId: `track:${index}`, trackName: trackNames[index], clips });
       }
       return { tracks };
+    });
+  }
+
+  getClipNotes(trackIndex: number, sceneIndex: number): Promise<ToolResult> {
+    trackIndexSchema.parse(trackIndex); sceneIndexSchema.parse(sceneIndex);
+    return this.read("get_clip_notes", async () => {
+      const arg = [oscInt(trackIndex)];
+      const notesReply = await this.live.query("/live/clip/get/notes", [oscInt(trackIndex), oscInt(sceneIndex)]);
+      const notes = parseNoteReply(notesReply.args, trackIndex, sceneIndex);
+      const lengths = (await this.live.query("/live/track/get/clips/length", arg)).args.slice(1);
+      const length = lengths[sceneIndex];
+      if (length === null || length === undefined) throw new Error(`No clip exists at track ${trackIndex}, scene ${sceneIndex}.`);
+      return { trackIndex, sceneIndex, id: `clip:${trackIndex}:${sceneIndex}`, lengthBeats: Number(length), noteCount: notes.length, notes };
     });
   }
 
