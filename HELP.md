@@ -140,7 +140,7 @@ All tools follow the same contract: **exact targets** (mutations require indices
 - **get_selected_track / get_selected_clip** — The current selection, refused politely when it isn't a regular track/clip.
 - **create_midi_clip** — Create a Session View MIDI clip with an exact beat length.
 - **get_clip_notes** — Read every MIDI note in a Session View clip (pitch, start and duration in beats, velocity, mute), sorted by start time then pitch, plus the clip length. Read only.
-- **add_midi_notes** — Validate and add MIDI notes to a Session View clip. Pitches accept integers or Ableton-style note names (`C3` is MIDI 60).
+- **add_midi_notes** — Validate and add MIDI notes to a Session View clip. Pitches accept integers or Ableton-style note names (`C3` is MIDI 60). After writing, the clip is read back and the call fails, naming the missing notes, unless every requested note is present (pitch, start and duration within 0.001 beats, velocity, mute).
 
 ### Arrangement
 
