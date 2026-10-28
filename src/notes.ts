@@ -28,3 +28,20 @@ export function parseNoteReply(args: OscAtom[], trackIndex: number, sceneIndex: 
 export function sortNotes<T extends { startTime: number; pitch: number }>(notes: T[]): T[] {
   return [...notes].sort((a, b) => a.startTime - b.startTime || a.pitch - b.pitch);
 }
+
+const TIME_TOLERANCE = 0.001;
+
+/** Return the requested notes that are not present in the clip read-back (each clip note can match one request). */
+export function findMissingNotes(requested: ClipNote[], actual: ClipNote[]): ClipNote[] {
+  const pool = [...actual];
+  const missing: ClipNote[] = [];
+  for (const want of requested) {
+    const index = pool.findIndex(have => have.pitch === want.pitch
+      && Math.abs(have.startTime - want.startTime) <= TIME_TOLERANCE
+      && Math.abs(have.duration - want.duration) <= TIME_TOLERANCE
+      && Math.round(have.velocity) === want.velocity
+      && have.mute === want.mute);
+    if (index === -1) missing.push(want); else pool.splice(index, 1);
+  }
+  return missing;
+}
