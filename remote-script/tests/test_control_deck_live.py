@@ -56,6 +56,10 @@ class ArrangementNote(object):
         self.note_id = note_id
 
 
+class NoteVector(list):
+    """Stand-in for the std::vector<TNoteInfo> get_notes_extended returns."""
+
+
 class ArrangementClip(object):
     def __init__(self, name, start, end, midi=True):
         self.name = name
@@ -66,6 +70,8 @@ class ArrangementClip(object):
         self.is_audio_clip = not midi
         self._notes = []
         self._next_id = 1
+        self.last_vector = None
+        self.last_applied = None
 
     def add_new_notes(self, specs):
         for spec in specs:
@@ -73,12 +79,24 @@ class ArrangementClip(object):
             self._next_id += 1
 
     def get_notes_extended(self, from_pitch, pitch_span, from_time, time_span):
-        return [
+        vector = NoteVector(
             note for note in self._notes
             if from_pitch <= int(note.pitch) < from_pitch + pitch_span and from_time <= float(note.start_time) < from_time + time_span
-        ]
+        )
+        self.last_vector = vector
+        return vector
 
     def apply_note_modifications(self, notes):
+        # Live 12.4.16: a tuple does not match std::vector<NClipApi::TNoteInfo>.
+        if isinstance(notes, tuple):
+            raise TypeError(
+                "Python argument types in Clip.apply_note_modifications(Clip, tuple) "
+                "did not match C++ signature: "
+                "apply_note_modifications(TPyHandle<AClip>, std::vector<NClipApi::TNoteInfo>)"
+            )
+        if notes is not self.last_vector:
+            raise TypeError("apply_note_modifications requires the vector object returned by get_notes_extended")
+        self.last_applied = notes
         known = set(note.note_id for note in self._notes)
         for note in notes:
             if note.note_id not in known:
@@ -246,6 +264,10 @@ class ControlDeckLiveTests(unittest.TestCase):
         self.assertEqual(listed["args"][:5], [0, 0, 0.0, 8.0, "midi"])
         self.assertEqual(listed["args"][5:11], [60, 0.0, 1.0, 100.0, False, 1])
         self.bridge._live_command({"address": "/live/arrangement_clip/modify/notes", "args": [0, "Synth", 0, 0.0, 1, 67, 0.0, 1.0, 100, False]})
+        clip = self.song.tracks[0].arrangement_clips[0]
+        self.assertIs(clip.last_applied, clip.last_vector)
+        self.assertIsInstance(clip.last_applied, NoteVector)
+        self.assertNotIsInstance(clip.last_applied, tuple)
         modified = self.bridge._live_query({"address": "/live/arrangement_clip/get/notes", "args": [0, "Synth", 0, 0.0]})
         self.assertEqual(modified["args"][5], 67)
         self.bridge._live_command({"address": "/live/arrangement_clip/remove/notes", "args": [0, "Synth", 0, 0.0, 64, 1, 1.0, 0.5]})

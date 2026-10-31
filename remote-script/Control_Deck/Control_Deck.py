@@ -579,16 +579,18 @@ class ControlDeckBridge(ControlSurface):
         if kind != "midi":
             raise BridgeError("CLIP_NOT_MIDI", "Arrangement clip %d is %s, not MIDI" % (clip_index, kind))
 
-    def _clip_notes(self, clip):
+    def _note_vector(self, clip):
+        # get_notes_extended returns std::vector<TNoteInfo>. apply_note_modifications
+        # requires that same vector object; a tuple or a copied list does not match.
         span = 16384.0
         try:
             span = max(span, float(clip.length) + 1.0)
         except Exception:
             pass
-        notes = []
-        for note in clip.get_notes_extended(0, 128, -8192.0, span):
-            notes.append(note)
-        return notes
+        return clip.get_notes_extended(0, 128, -8192.0, span)
+
+    def _clip_notes(self, clip):
+        return [note for note in self._note_vector(clip)]
 
     def _note_payload(self, notes):
         values = []
@@ -611,13 +613,13 @@ class ControlDeckBridge(ControlSurface):
             raise BridgeError("INVALID_NOTES", "Note modifications must contain groups of id, pitch, start, duration, velocity, and mute")
         if len(mods) // 6 > MAX_NOTES_PER_CALL:
             raise BridgeError("INVALID_NOTES", "At most %d notes can be modified at once" % MAX_NOTES_PER_CALL)
+        vector = self._note_vector(clip)
         by_id = {}
-        for note in self._clip_notes(clip):
+        for note in vector:
             note_id = int(note.note_id)
             if note_id in by_id:
                 raise BridgeError("NOTE_ID_AMBIGUOUS", "Arrangement clip %d has more than one note with id %d" % (clip_index, note_id))
             by_id[note_id] = note
-        changed = []
         seen = set()
         for offset in range(0, len(mods), 6):
             note_id = self._whole_number(mods[offset], "note id", 0, 2 ** 53)
@@ -633,8 +635,9 @@ class ControlDeckBridge(ControlSurface):
             note.duration = duration
             note.velocity = float(velocity)
             note.mute = bool(mods[offset + 5])
-            changed.append(note)
-        clip.apply_note_modifications(tuple(changed))
+        # Session clips only call add_new_notes(tuple of MidiNoteSpecification), which Live accepts.
+        # apply_note_modifications does not: Live 12.4.16 rejected a tuple and requires this vector.
+        clip.apply_note_modifications(vector)
 
     def _remove_arrangement_notes(self, args):
         self._require_args(args, 8, "/live/arrangement_clip/remove/notes")

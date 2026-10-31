@@ -152,7 +152,7 @@ Note times below are beats from the start of the clip. Clip `startBeats` is the 
 - **clear_arrangement_track** — Delete every Arrangement clip on one track. `confirm: true` is mandatory.
 - **get_arrangement_clip_notes** — Read every note in one Arrangement MIDI clip, including `noteId`, pitch, start, duration, velocity, and mute.
 - **add_arrangement_clip_notes** — Add notes, then read the clip back. The call fails if any requested note is missing or different. One note already in the clip can satisfy only one requested note. Pitches accept integers or note names (`C3` is MIDI 60). At most 256 notes per call.
-- **modify_arrangement_clip_notes** — Change existing notes by `noteId` (`Clip.apply_note_modifications`). Omit a field to leave it alone. The clip is read back and each changed note must match.
+- **modify_arrangement_clip_notes** — Change existing notes by `noteId` (`Clip.apply_note_modifications`). The bridge edits the note vector `get_notes_extended` returns and passes that same vector back. A tuple does not match Live's signature. Omit a field to leave it alone. The clip is read back and each changed note must match.
 - **remove_arrangement_clip_notes** — Remove notes whose start lies in a pitch and time range (`Clip.remove_notes_extended`). `fromTime` is inclusive and `fromTime + timeSpan` is exclusive. `pitchSpan` counts pitches starting at `fromPitch`. The call fails when the range matches nothing. Notes outside the range must still be there afterward.
 
 ```json

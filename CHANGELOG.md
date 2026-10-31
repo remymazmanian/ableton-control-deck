@@ -10,6 +10,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `get_arrangement_clip_notes`, `add_arrangement_clip_notes`, `modify_arrangement_clip_notes`, and `remove_arrangement_clip_notes` read and edit notes on an Arrangement MIDI clip. The clip is addressed by track plus clip index or start time. Every write reads the notes back.
 - `load_user_library_item` loads a User Library item, such as a saved Instrument Rack (`.adg`) or device preset (`.adv`), onto an exact track by exact name. Ambiguous names are refused. The device chain is read back. A filesystem path, including `.vstpreset` and `.aupreset`, is refused.
 
+### Fixed
+
+- `modify_arrangement_clip_notes` passes the note vector from `get_notes_extended` to `Clip.apply_note_modifications`. Live 12.4.16 rejects a tuple.
+
 ### Changed
 
 - `list_arrangement_clips` now includes each clip's index, length, and whether it is MIDI or audio.
