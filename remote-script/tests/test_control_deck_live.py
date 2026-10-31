@@ -253,6 +253,12 @@ class ControlDeckLiveTests(unittest.TestCase):
         self.assertEqual(len(remaining["args"]), 11)
         self.assertEqual(remaining["args"][5], 67)
 
+    def test_arrangement_note_writes_refuse_a_fractional_clip_index(self):
+        self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 0.0, 4.0]})
+        with self.assertRaises(Exception) as raised:
+            self.bridge._live_query({"address": "/live/arrangement_clip/get/notes", "args": [0, "Synth", 1.5, 0.0]})
+        self.assertIn("non-negative integer", str(raised.exception))
+
     def test_arrangement_note_writes_refuse_the_wrong_clip_or_an_audio_clip(self):
         self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 0.0, 4.0]})
         with self.assertRaises(Exception) as mismatch:

@@ -563,13 +563,8 @@ class ControlDeckBridge(ControlSurface):
     def _arrangement_target(self, args):
         self._require_args(args, 4, "arrangement clip operation")
         track_index, track = self._named_track(args)
-        try:
-            clip_index = int(args[2])
-            expected_start = float(args[3])
-        except Exception:
-            raise BridgeError("INVALID_ARGUMENTS", "Arrangement clip index and start time must be numeric")
-        if isinstance(args[2], bool) or clip_index < 0:
-            raise BridgeError("INVALID_ARGUMENTS", "Arrangement clip index must be a non-negative integer")
+        clip_index = self._non_negative_index(args[2], "Arrangement clip index")
+        expected_start = self._finite_float(args[3], "Arrangement clip start")
         clips = list(track.arrangement_clips)
         if clip_index >= len(clips):
             raise BridgeError("CLIP_NOT_FOUND", "Arrangement clip index %d does not exist on track %d" % (clip_index, track_index))
@@ -679,6 +674,14 @@ class ControlDeckBridge(ControlSurface):
             raise BridgeError("INVALID_NOTES", "Note start must be >= 0 and duration must be positive")
         velocity_number = self._whole_number(velocity, "velocity", minimum_velocity, 127)
         return pitch_number, start_number, duration_number, velocity_number
+
+    def _non_negative_index(self, value, label):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise BridgeError("INVALID_ARGUMENTS", "%s must be an integer" % label)
+        number = float(value)
+        if number != number or not number.is_integer() or number < 0:
+            raise BridgeError("INVALID_ARGUMENTS", "%s must be a non-negative integer" % label)
+        return int(number)
 
     def _whole_number(self, value, label, low, high):
         if isinstance(value, bool) or not isinstance(value, (int, float)):
