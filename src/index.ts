@@ -95,6 +95,22 @@ server.tool("list_arrangement_clips", "List Arrangement View clips on a track wi
 server.tool("create_arrangement_midi_clip", "Create an empty Arrangement MIDI clip with Track.create_midi_clip(start_time, length). Needs Live 12.1.10 or newer. Requires the track index and current name, then reads the clip back.", {
   trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), startBeats: z.number().min(0), lengthBeats: z.number().positive(), name: z.string().min(1).max(128).optional(), dryRun: z.boolean().default(false)
 }, async input => response(await live.createArrangementMidiClip(input)));
+const arrangementClipTarget = { trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), clipIndex: z.number().int().min(0).optional(), startBeats: z.number().min(0).optional() };
+server.tool("get_arrangement_clip_notes", "Read notes in one Arrangement MIDI clip, addressed by track plus clip index or start time. Note times are beats from the start of the clip.", arrangementClipTarget, async input => response(await live.getArrangementClipNotes(input)));
+server.tool("add_arrangement_clip_notes", "Add MIDI notes to an Arrangement MIDI clip and read them back. A requested note that is missing or different fails the call. Note times are beats from the start of the clip.", {
+  ...arrangementClipTarget,
+  notes: z.array(z.object({ pitch: z.union([z.number().int(), z.string()]), startTime: z.number(), duration: z.number(), velocity: z.number().int(), mute: z.boolean().default(false) })).min(1),
+  dryRun: z.boolean().default(false)
+}, async input => response(await live.addArrangementClipNotes(input)));
+server.tool("modify_arrangement_clip_notes", "Change existing Arrangement MIDI notes by note id from get_arrangement_clip_notes, then read them back. Unspecified fields stay as they are.", {
+  ...arrangementClipTarget,
+  notes: z.array(z.object({ noteId: z.number().int().min(0), pitch: z.union([z.number().int(), z.string()]).optional(), startTime: z.number().min(0).optional(), duration: z.number().positive().optional(), velocity: z.number().int().min(1).max(127).optional(), mute: z.boolean().optional() })).min(1),
+  dryRun: z.boolean().default(false)
+}, async input => response(await live.modifyArrangementClipNotes(input)));
+server.tool("remove_arrangement_clip_notes", "Remove Arrangement MIDI notes whose start lies in a pitch and time range, using Clip.remove_notes_extended, then read the clip back. Times are beats from the start of the clip. The end of the time range is exclusive.", {
+  ...arrangementClipTarget,
+  fromPitch: z.number().int().min(0).max(127), pitchSpan: z.number().int().min(1).max(128), fromTime: z.number().min(0), timeSpan: z.number().positive(), dryRun: z.boolean().default(false)
+}, async input => response(await live.removeArrangementClipNotes(input)));
 server.tool("place_clip_in_arrangement", "Copy a Session View clip (MIDI or audio) into the Arrangement, tiled back-to-back from startBeats until endBeats, and verify. Each copy is the full clip, so the last one can run past endBeats. At most 512 copies.", {
   trackIndex: z.number().int().min(0), sceneIndex: z.number().int().min(0), startBeats: z.number().min(0), endBeats: z.number().positive(), dryRun: z.boolean().default(false)
 }, async input => response(await live.placeClipInArrangement(input)));

@@ -1,7 +1,7 @@
-import { findCreatedMidiClip, MAX_ARRANGEMENT_BEATS, parseArrangementClips, type ArrangementClipDescriptor } from "./arrangement-clips.js";
+import { findCreatedMidiClip, MAX_ARRANGEMENT_BEATS, MAX_NOTES_PER_CALL, notesStartingInRange, parseArrangementClips, parseArrangementNotes, resolveArrangementClip, verifyAddedNotes, verifyModifiedNotes, verifyRemovedNotes, type ArrangementClipDescriptor, type ArrangementNote } from "./arrangement-clips.js";
 import { JsonLogger } from "./logger.js";
 import { oscFloat, oscInt, type LiveControlClient, type OscArgument, type ToolResult } from "./types.js";
-import { trackIndexSchema } from "./validation.js";
+import { noteNameToMidi, trackIndexSchema, validateNotes } from "./validation.js";
 
 const bool = (value: unknown) => value === true || value === 1;
 const last = (values: unknown[]) => values.at(-1);
@@ -296,6 +296,26 @@ export class LiveTools {
     return cues.sort((a, b) => a.timeBeats - b.timeBeats);
   }
 
+  private async requireArrangementMidiClip(input: { trackIndex: number; expectedTrackName: string; clipIndex?: number; startBeats?: number }): Promise<{ trackName: string; clip: ArrangementClipDescriptor }> {
+    trackIndexSchema.parse(input.trackIndex);
+    if (!input.expectedTrackName.trim()) throw new Error("Expected track name must not be empty.");
+    const trackName = await this.assertTrackName(input.trackIndex, input.expectedTrackName);
+    const clip = resolveArrangementClip(await this.arrangementClips(input.trackIndex), input);
+    if (clip.kind !== "midi") throw new Error(`Arrangement clip ${clip.index} is ${clip.kind}, not MIDI.`);
+    return { trackName, clip };
+  }
+
+  private arrangementNoteArgs(trackIndex: number, trackName: string, clip: ArrangementClipDescriptor): OscArgument[] {
+    return [oscInt(trackIndex), trackName, oscInt(clip.index), oscFloat(clip.startBeats)];
+  }
+
+  private async readArrangementNotes(trackIndex: number, clip: ArrangementClipDescriptor, prefix: OscArgument[]) {
+    const parsed = parseArrangementNotes((await this.live.query("/live/arrangement_clip/get/notes", prefix)).args, { trackIndex, clipIndex: clip.index });
+    if (Math.abs(parsed.startBeats - clip.startBeats) >= 0.001) throw new Error(`Arrangement clip ${clip.index} moved: expected start ${clip.startBeats}, Live reports ${parsed.startBeats}.`);
+    if (parsed.kind !== "midi") throw new Error(`Arrangement clip ${clip.index} is ${parsed.kind}, not MIDI.`);
+    return parsed;
+  }
+
   private async arrangementClips(trackIndex: number): Promise<ArrangementClipDescriptor[]> {
     const reply = await this.live.query("/live/track/get/arrangement_clips", [oscInt(trackIndex)]);
     return parseArrangementClips(reply.args, trackIndex);
@@ -389,6 +409,76 @@ export class LiveTools {
     });
   }
 
+  async getArrangementClipNotes(input: { trackIndex: number; expectedTrackName: string; clipIndex?: number; startBeats?: number }): Promise<ToolResult> {
+    const { trackName, clip } = await this.requireArrangementMidiClip(input);
+    const prefix = this.arrangementNoteArgs(input.trackIndex, trackName, clip);
+    return this.read("get_arrangement_clip_notes", async () => {
+      const parsed = await this.readArrangementNotes(input.trackIndex, clip, prefix);
+      return { trackIndex: input.trackIndex, trackName, clip, noteCount: parsed.notes.length, notes: parsed.notes };
+    });
+  }
+
+  async addArrangementClipNotes(input: { trackIndex: number; expectedTrackName: string; clipIndex?: number; startBeats?: number; notes: Array<{ pitch: number | string; startTime: number; duration: number; velocity: number; mute?: boolean }>; dryRun?: boolean }): Promise<ToolResult> {
+    const valid = validateNotes(input.notes);
+    if (valid.length > MAX_NOTES_PER_CALL) throw new Error(`At most ${MAX_NOTES_PER_CALL} notes can be added at once.`);
+    const { trackName, clip } = await this.requireArrangementMidiClip(input);
+    const args = this.arrangementNoteArgs(input.trackIndex, trackName, clip);
+    for (const note of valid) args.push(oscInt(note.pitch), oscFloat(note.startTime), oscFloat(note.duration), oscInt(note.velocity), note.mute);
+    return this.mutate("add_arrangement_clip_notes", input, [{ address: "/live/arrangement_clip/add/notes", args }], input.dryRun ?? false, async () => {
+      const parsed = await this.readArrangementNotes(input.trackIndex, clip, this.arrangementNoteArgs(input.trackIndex, trackName, clip));
+      verifyAddedNotes(valid, parsed.notes);
+      return { trackIndex: input.trackIndex, trackName, clip, noteCountRequested: valid.length, noteCountInClip: parsed.notes.length, notes: parsed.notes };
+    });
+  }
+
+  async modifyArrangementClipNotes(input: { trackIndex: number; expectedTrackName: string; clipIndex?: number; startBeats?: number; dryRun?: boolean; notes: Array<{ noteId: number; pitch?: number | string; startTime?: number; duration?: number; velocity?: number; mute?: boolean }> }): Promise<ToolResult> {
+    if (!Array.isArray(input.notes) || input.notes.length === 0) throw new Error("At least one note modification is required.");
+    if (input.notes.length > MAX_NOTES_PER_CALL) throw new Error(`At most ${MAX_NOTES_PER_CALL} notes can be modified at once.`);
+    const seen = new Set<number>();
+    for (const note of input.notes) {
+      if (!Number.isInteger(note.noteId) || note.noteId < 0) throw new Error("noteId must be a non-negative integer.");
+      if (seen.has(note.noteId)) throw new Error(`Note id ${note.noteId} was given more than once.`);
+      seen.add(note.noteId);
+      if (note.pitch === undefined && note.startTime === undefined && note.duration === undefined && note.velocity === undefined && note.mute === undefined) throw new Error(`Note id ${note.noteId} has no fields to change.`);
+    }
+    const { trackName, clip } = await this.requireArrangementMidiClip(input);
+    const current = await this.readArrangementNotes(input.trackIndex, clip, this.arrangementNoteArgs(input.trackIndex, trackName, clip));
+    if (new Set(current.notes.map(note => note.noteId)).size !== current.notes.length) throw new Error("Arrangement clip has duplicate note ids; refusing to modify.");
+    const byId = new Map(current.notes.map(note => [note.noteId, note]));
+    const desired: ArrangementNote[] = input.notes.map(change => {
+      const existing = byId.get(change.noteId);
+      if (!existing) throw new Error(`No note with id ${change.noteId} in arrangement clip ${clip.index}.`);
+      const pitch = change.pitch === undefined ? existing.pitch : typeof change.pitch === "string" ? noteNameToMidi(change.pitch) : change.pitch;
+      const velocity = change.velocity === undefined ? Math.round(existing.velocity) : change.velocity;
+      const next = { noteId: change.noteId, pitch, startTime: change.startTime ?? existing.startTime, duration: change.duration ?? existing.duration, velocity, mute: change.mute ?? existing.mute };
+      assertOutgoingNote(next, change.velocity === undefined ? 0 : 1);
+      return next;
+    });
+    const args = this.arrangementNoteArgs(input.trackIndex, trackName, clip);
+    for (const note of desired) args.push(oscInt(note.noteId), oscInt(note.pitch), oscFloat(note.startTime), oscFloat(note.duration), oscInt(note.velocity), note.mute);
+    return this.mutate("modify_arrangement_clip_notes", input, [{ address: "/live/arrangement_clip/modify/notes", args }], input.dryRun ?? false, async () => {
+      const parsed = await this.readArrangementNotes(input.trackIndex, clip, this.arrangementNoteArgs(input.trackIndex, trackName, clip));
+      verifyModifiedNotes(desired, parsed.notes);
+      return { trackIndex: input.trackIndex, trackName, clip, noteCountModified: desired.length, noteCountInClip: parsed.notes.length, notes: parsed.notes };
+    });
+  }
+
+  async removeArrangementClipNotes(input: { trackIndex: number; expectedTrackName: string; clipIndex?: number; startBeats?: number; fromPitch: number; pitchSpan: number; fromTime: number; timeSpan: number; dryRun?: boolean }): Promise<ToolResult> {
+    const { fromPitch, pitchSpan, fromTime, timeSpan } = input;
+    if (!Number.isInteger(fromPitch) || fromPitch < 0 || fromPitch > 127 || !Number.isInteger(pitchSpan) || pitchSpan < 1 || fromPitch + pitchSpan > 128) throw new Error("Pitch range must stay inside MIDI pitches 0-127.");
+    if (!Number.isFinite(fromTime) || fromTime < 0 || !Number.isFinite(timeSpan) || timeSpan <= 0) throw new Error("fromTime must be >= 0 and timeSpan must be positive. Times are beats from the start of the clip.");
+    const { trackName, clip } = await this.requireArrangementMidiClip(input);
+    const before = await this.readArrangementNotes(input.trackIndex, clip, this.arrangementNoteArgs(input.trackIndex, trackName, clip));
+    const targets = notesStartingInRange(before.notes, { fromPitch, pitchSpan, fromTime, timeSpan });
+    if (!targets.length) throw new Error("No notes start in that pitch and time range.");
+    const args = [...this.arrangementNoteArgs(input.trackIndex, trackName, clip), oscInt(fromPitch), oscInt(pitchSpan), oscFloat(fromTime), oscFloat(timeSpan)];
+    return this.mutate("remove_arrangement_clip_notes", input, [{ address: "/live/arrangement_clip/remove/notes", args }], input.dryRun ?? false, async () => {
+      const parsed = await this.readArrangementNotes(input.trackIndex, clip, this.arrangementNoteArgs(input.trackIndex, trackName, clip));
+      verifyRemovedNotes(before.notes, targets.map(note => note.noteId), parsed.notes);
+      return { trackIndex: input.trackIndex, trackName, clip, fromPitch, pitchSpan, fromTime, timeSpan, removedNoteIds: targets.map(note => note.noteId), removedCount: targets.length, noteCountInClip: parsed.notes.length, notes: parsed.notes };
+    });
+  }
+
   async placeClipInArrangement(input: { trackIndex: number; sceneIndex: number; startBeats: number; endBeats: number; dryRun?: boolean }): Promise<ToolResult> {
     const { trackIndex, sceneIndex, startBeats, endBeats, dryRun = false } = input;
     trackIndexSchema.parse(trackIndex);
@@ -477,4 +567,11 @@ export class LiveTools {
     if (matches.length > 1) throw new Error(`Multiple parameters are named '${parameterName}'; provide parameterIndex.`);
     throw new Error(`Plugin parameter '${parameterName}' was not found.`);
   }
+}
+
+function assertOutgoingNote(note: { pitch: number; startTime: number; duration: number; velocity: number }, velocityMin: number): void {
+  if (!Number.isInteger(note.pitch) || note.pitch < 0 || note.pitch > 127) throw new Error("Pitch must be an integer from 0 to 127.");
+  if (!Number.isFinite(note.startTime) || note.startTime < 0) throw new Error("Note start must be a non-negative number of beats.");
+  if (!Number.isFinite(note.duration) || note.duration <= 0) throw new Error("Note duration must be positive.");
+  if (!Number.isInteger(note.velocity) || note.velocity < velocityMin || note.velocity > 127) throw new Error(`Velocity must be an integer from ${velocityMin} to 127.`);
 }

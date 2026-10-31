@@ -46,6 +46,51 @@ class Parameter(object):
         return "%.2f" % value
 
 
+class ArrangementNote(object):
+    def __init__(self, pitch, start, duration, velocity, mute, note_id):
+        self.pitch = pitch
+        self.start_time = start
+        self.duration = duration
+        self.velocity = float(velocity)
+        self.mute = mute
+        self.note_id = note_id
+
+
+class ArrangementClip(object):
+    def __init__(self, name, start, end, midi=True):
+        self.name = name
+        self.start_time = float(start)
+        self.end_time = float(end)
+        self.length = self.end_time - self.start_time
+        self.is_midi_clip = midi
+        self.is_audio_clip = not midi
+        self._notes = []
+        self._next_id = 1
+
+    def add_new_notes(self, specs):
+        for spec in specs:
+            self._notes.append(ArrangementNote(spec.pitch, spec.start_time, spec.duration, spec.velocity, spec.mute, self._next_id))
+            self._next_id += 1
+
+    def get_notes_extended(self, from_pitch, pitch_span, from_time, time_span):
+        return [
+            note for note in self._notes
+            if from_pitch <= int(note.pitch) < from_pitch + pitch_span and from_time <= float(note.start_time) < from_time + time_span
+        ]
+
+    def apply_note_modifications(self, notes):
+        known = set(note.note_id for note in self._notes)
+        for note in notes:
+            if note.note_id not in known:
+                raise RuntimeError("unknown note")
+
+    def remove_notes_extended(self, from_pitch, pitch_span, from_time, time_span):
+        self._notes = [
+            note for note in self._notes
+            if not (from_pitch <= int(note.pitch) < from_pitch + pitch_span and from_time <= float(note.start_time) < from_time + time_span)
+        ]
+
+
 class Clip(object):
     def __init__(self):
         self.name = "Chord"
@@ -101,7 +146,7 @@ class Track(object):
         for clip in self.arrangement_clips:
             if start < float(clip.end_time) and end > float(clip.start_time):
                 raise RuntimeError("Clip overlaps with an existing arrangement clip")
-        created = types.SimpleNamespace(name="", start_time=start, end_time=end, length=length, is_midi_clip=True, is_audio_clip=False)
+        created = ArrangementClip("", start, end, True)
         self.arrangement_clips.append(created)
         self.arrangement_clips.sort(key=lambda clip: float(clip.start_time))
         return created
@@ -193,6 +238,39 @@ class ControlDeckLiveTests(unittest.TestCase):
             self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 0.0, 4.0]})
         self.assertIn("12.1.10", str(raised.exception))
         self.assertIn("12.4", str(raised.exception))
+
+    def test_adds_reads_modifies_and_removes_arrangement_notes(self):
+        self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 0.0, 8.0, "Lead"]})
+        self.bridge._live_command({"address": "/live/arrangement_clip/add/notes", "args": [0, "Synth", 0, 0.0, 60, 0.0, 1.0, 100, False, 64, 1.0, 0.5, 90, True]})
+        listed = self.bridge._live_query({"address": "/live/arrangement_clip/get/notes", "args": [0, "Synth", 0, 0.0]})
+        self.assertEqual(listed["args"][:5], [0, 0, 0.0, 8.0, "midi"])
+        self.assertEqual(listed["args"][5:11], [60, 0.0, 1.0, 100.0, False, 1])
+        self.bridge._live_command({"address": "/live/arrangement_clip/modify/notes", "args": [0, "Synth", 0, 0.0, 1, 67, 0.0, 1.0, 100, False]})
+        modified = self.bridge._live_query({"address": "/live/arrangement_clip/get/notes", "args": [0, "Synth", 0, 0.0]})
+        self.assertEqual(modified["args"][5], 67)
+        self.bridge._live_command({"address": "/live/arrangement_clip/remove/notes", "args": [0, "Synth", 0, 0.0, 64, 1, 1.0, 0.5]})
+        remaining = self.bridge._live_query({"address": "/live/arrangement_clip/get/notes", "args": [0, "Synth", 0, 0.0]})
+        self.assertEqual(len(remaining["args"]), 11)
+        self.assertEqual(remaining["args"][5], 67)
+
+    def test_arrangement_note_writes_refuse_the_wrong_clip_or_an_audio_clip(self):
+        self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 0.0, 4.0]})
+        with self.assertRaises(Exception) as mismatch:
+            self.bridge._live_command({"address": "/live/arrangement_clip/add/notes", "args": [0, "Synth", 0, 3.0, 60, 0.0, 1.0, 100, False]})
+        self.assertIn("starts at", str(mismatch.exception))
+        self.assertEqual(self.song.tracks[0].arrangement_clips[0]._notes, [])
+        self.song.tracks[0].arrangement_clips = [ArrangementClip("Room", 0.0, 4.0, False)]
+        with self.assertRaises(Exception) as audio:
+            self.bridge._live_query({"address": "/live/arrangement_clip/get/notes", "args": [0, "Synth", 0, 0.0]})
+        self.assertIn("not MIDI", str(audio.exception))
+
+    def test_remove_arrangement_notes_refuses_an_empty_range(self):
+        self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 0.0, 4.0]})
+        self.bridge._live_command({"address": "/live/arrangement_clip/add/notes", "args": [0, "Synth", 0, 0.0, 60, 0.0, 1.0, 100, False]})
+        with self.assertRaises(Exception) as empty:
+            self.bridge._live_command({"address": "/live/arrangement_clip/remove/notes", "args": [0, "Synth", 0, 0.0, 61, 1, 0.0, 1.0]})
+        self.assertIn("No notes", str(empty.exception))
+        self.assertEqual(len(self.song.tracks[0].arrangement_clips[0]._notes), 1)
 
     def test_lists_arrangement_clips_with_midi_or_audio_kind(self):
         self.song.tracks[0].arrangement_clips = [

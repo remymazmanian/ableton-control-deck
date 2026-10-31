@@ -10,6 +10,9 @@ function fakeLive(state: { cues?: Array<[string, number]>; playhead?: number; pl
     playhead: state.playhead ?? 0,
     playing: state.playing ?? false,
     clips: [...(state.clips ?? [])],
+    notes: [] as Array<Array<[number, number, number, number, boolean, number]>>,
+    nextNoteId: 1,
+    dropNoteWrites: false,
     sent: [] as string[],
     send: vi.fn(async (address: string, args: unknown[] = []) => {
       live.sent.push(address);
@@ -19,7 +22,36 @@ function fakeLive(state: { cues?: Array<[string, number]>; playhead?: number; pl
       if (address === "/live/song/create_cue_point" && Math.abs(live.playhead - Number(v[0])) < 0.001) live.cues.push(["", Number(v[0])]);
       if (address === "/live/song/delete_cue_point") live.cues = live.cues.filter(([, t]) => Math.abs(t - Number(v[0])) >= 0.001 || Math.abs(live.playhead - t) >= 0.001);
       if (address === "/live/cue_point/set_name") live.cues = live.cues.map(([n, t]) => [Math.abs(t - Number(v[0])) < 0.001 ? String(v[1]) : n, t]);
-      if (address === "/live/track/clear_arrangement") live.clips = [];
+      if (address === "/live/track/clear_arrangement") {
+        live.clips = [];
+        live.notes = [];
+      }
+      if (address === "/live/arrangement_clip/add/notes" && !live.dropNoteWrites) {
+        const clipIndex = Number(v[2]);
+        const bucket = live.notes[clipIndex] ?? [];
+        for (let offset = 4; offset + 4 < v.length; offset += 5) bucket.push([Number(v[offset]), Number(v[offset + 1]), Number(v[offset + 2]), Number(v[offset + 3]), Boolean(v[offset + 4]), live.nextNoteId++]);
+        live.notes[clipIndex] = bucket;
+      }
+      if (address === "/live/arrangement_clip/modify/notes") {
+        const bucket = live.notes[Number(v[2])] ?? [];
+        for (let offset = 4; offset + 5 < v.length; offset += 6) {
+          const note = bucket.find(item => item[5] === Number(v[offset]));
+          if (!note) throw new Error("missing note");
+          note[0] = Number(v[offset + 1]);
+          note[1] = Number(v[offset + 2]);
+          note[2] = Number(v[offset + 3]);
+          note[3] = Number(v[offset + 4]);
+          note[4] = Boolean(v[offset + 5]);
+        }
+      }
+      if (address === "/live/arrangement_clip/remove/notes") {
+        const clipIndex = Number(v[2]);
+        const fromPitch = Number(v[4]);
+        const pitchSpan = Number(v[5]);
+        const fromTime = Number(v[6]);
+        const timeSpan = Number(v[7]);
+        live.notes[clipIndex] = (live.notes[clipIndex] ?? []).filter(note => !(note[0] >= fromPitch && note[0] < fromPitch + pitchSpan && note[1] >= fromTime && note[1] < fromTime + timeSpan));
+      }
       if (address === "/live/track/create_arrangement_midi_clip") {
         const start = Number(v[2]);
         const length = Number(v[3]);
@@ -32,12 +64,18 @@ function fakeLive(state: { cues?: Array<[string, number]>; playhead?: number; pl
         for (let p = Number(v[2]); p < Number(v[3]) - 0.0001; p += step) live.clips.push(["Loop", p, p + step, "midi"]);
       }
     }),
-    query: vi.fn(async (address: string) => {
+    query: vi.fn(async (address: string, args: unknown[] = []) => {
+      const v = args.map(a => (a !== null && typeof a === "object" && "value" in a ? (a as { value: unknown }).value : a));
       if (address === "/live/song/get/cue_points") return { args: live.cues.flat() };
       if (address === "/live/song/get/current_song_time") return { args: [live.playhead] };
       if (address === "/live/song/get/is_playing") return { args: [live.playing] };
       if (address === "/live/song/get/track_names") return { args: ["Drums", "Bass"] };
       if (address === "/live/track/get/arrangement_clips") return { args: [0, ...live.clips.flat()] };
+      if (address === "/live/arrangement_clip/get/notes") {
+        const clipIndex = Number(v[2]);
+        const clip = live.clips[clipIndex];
+        return { args: [Number(v[0]), clipIndex, clip?.[1] ?? 0, clip?.[2] ?? 0, clip?.[3] ?? "midi", ...(live.notes[clipIndex] ?? []).flat()] };
+      }
       return { args: [] };
     })
   };
@@ -149,6 +187,36 @@ describe("arrangement clips", () => {
     const live = fakeLive();
     await expect(new LiveTools(live as never, logger as never).placeClipInArrangement({ trackIndex: 0, sceneIndex: 0, startBeats: 8, endBeats: 8 })).rejects.toThrow(/endBeats/);
     expect(live.send).not.toHaveBeenCalled();
+  });
+
+  it("adds, changes, and removes arrangement notes, reading them back each time", async () => {
+    const live = fakeLive({ clips: [["Lead", 0, 8, "midi"]] });
+    const tools = new LiveTools(live as never, logger as never);
+    const added = await tools.addArrangementClipNotes({ trackIndex: 0, expectedTrackName: "Drums", startBeats: 0, notes: [{ pitch: "C3", startTime: 1, duration: 0.5, velocity: 90 }, { pitch: 60, startTime: 0, duration: 1, velocity: 100, mute: false }] });
+    expect(added).toMatchObject({ ok: true, data: { noteCountRequested: 2, noteCountInClip: 2, notes: [{ pitch: 60, startTime: 0, noteId: 2 }, { pitch: 60, startTime: 1, noteId: 1, mute: false }] } });
+    const modified = await tools.modifyArrangementClipNotes({ trackIndex: 0, expectedTrackName: "Drums", clipIndex: 0, startBeats: 0, notes: [{ noteId: 2, pitch: "G3" }] });
+    expect(modified).toMatchObject({ ok: true, data: { noteCountModified: 1, noteCountInClip: 2 } });
+    expect((modified.data as { notes: Array<{ noteId: number; pitch: number }> }).notes.find(item => item.noteId === 2)?.pitch).toBe(67);
+    const removed = await tools.removeArrangementClipNotes({ trackIndex: 0, expectedTrackName: "Drums", clipIndex: 0, fromPitch: 60, pitchSpan: 1, fromTime: 1, timeSpan: 0.5 });
+    expect(removed).toMatchObject({ ok: true, data: { removedCount: 1, noteCountInClip: 1, notes: [{ noteId: 2, pitch: 67 }] } });
+  });
+
+  it("fails the add when the read-back is missing a requested note", async () => {
+    const live = fakeLive({ clips: [["Lead", 0, 4, "midi"]] });
+    live.dropNoteWrites = true;
+    const result = await new LiveTools(live as never, logger as never).addArrangementClipNotes({ trackIndex: 0, expectedTrackName: "Drums", clipIndex: 0, notes: [{ pitch: 60, startTime: 0, duration: 1, velocity: 100 }, { pitch: 64, startTime: 1, duration: 1, velocity: 100 }] });
+    expect(result).toMatchObject({ ok: false, error: { message: expect.stringMatching(/2 of 2 requested notes/) } });
+  });
+
+  it("refuses notes on an audio arrangement clip before writing", async () => {
+    const live = fakeLive({ clips: [["Room", 0, 4, "audio"]] });
+    await expect(new LiveTools(live as never, logger as never).getArrangementClipNotes({ trackIndex: 0, expectedTrackName: "Drums", clipIndex: 0 })).rejects.toThrow(/not MIDI/);
+    expect(live.send).not.toHaveBeenCalled();
+  });
+
+  it("refuses two arrangement clips that share a start time", async () => {
+    const live = fakeLive({ clips: [["A", 0, 4, "midi"], ["B", 0, 2, "midi"]] });
+    await expect(new LiveTools(live as never, logger as never).getArrangementClipNotes({ trackIndex: 0, expectedTrackName: "Drums", startBeats: 0 })).rejects.toThrow(/Multiple arrangement clips/);
   });
 
   it("requires confirm=true to clear a track's Arrangement", async () => {

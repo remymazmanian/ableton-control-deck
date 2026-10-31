@@ -28,6 +28,7 @@ MAX_QUEUE = 256
 MAX_RESPONSE_CACHE = 256
 # Live rejects arrangement clip times outside this range. See Track.create_midi_clip.
 MAX_ARRANGEMENT_BEATS = 1576800.0
+MAX_NOTES_PER_CALL = 256
 
 
 class ControlDeckBridge(ControlSurface):
@@ -260,6 +261,11 @@ class ControlDeckBridge(ControlSurface):
             values = [track_index, scene_index]
             for note in notes:
                 values.extend([note.pitch, note.start_time, note.duration, note.velocity, note.mute])
+        elif address == "/live/arrangement_clip/get/notes":
+            track_index, _track, clip_index, clip = self._arrangement_target(args)
+            self._require_midi_clip(clip, clip_index)
+            values = [track_index, clip_index, float(clip.start_time), float(clip.end_time), self._clip_kind(clip)]
+            values.extend(self._note_payload(self._clip_notes(clip)))
         elif address == "/live/view/get/selected_track":
             try:
                 index = list(song.tracks).index(song.view.selected_track)
@@ -350,6 +356,12 @@ class ControlDeckBridge(ControlSurface):
                 position += step
         elif address == "/live/track/create_arrangement_midi_clip":
             self._create_arrangement_midi_clip(args)
+        elif address == "/live/arrangement_clip/add/notes":
+            self._add_arrangement_notes(args)
+        elif address == "/live/arrangement_clip/modify/notes":
+            self._modify_arrangement_notes(args)
+        elif address == "/live/arrangement_clip/remove/notes":
+            self._remove_arrangement_notes(args)
         elif address == "/live/track/clear_arrangement":
             self._require_args(args, 2, address)
             _track_index, track = self._track(args)
@@ -545,6 +557,142 @@ class ControlDeckBridge(ControlSurface):
             return bool(getattr(clip, name))
         except Exception:
             return False
+
+    def _arrangement_target(self, args):
+        self._require_args(args, 4, "arrangement clip operation")
+        track_index, track = self._named_track(args)
+        try:
+            clip_index = int(args[2])
+            expected_start = float(args[3])
+        except Exception:
+            raise BridgeError("INVALID_ARGUMENTS", "Arrangement clip index and start time must be numeric")
+        if isinstance(args[2], bool) or clip_index < 0:
+            raise BridgeError("INVALID_ARGUMENTS", "Arrangement clip index must be a non-negative integer")
+        clips = list(track.arrangement_clips)
+        if clip_index >= len(clips):
+            raise BridgeError("CLIP_NOT_FOUND", "Arrangement clip index %d does not exist on track %d" % (clip_index, track_index))
+        clip = clips[clip_index]
+        actual_start = float(clip.start_time)
+        if abs(actual_start - expected_start) >= 0.001:
+            raise BridgeError("CLIP_IDENTITY_MISMATCH", "Arrangement clip %d on track '%s' starts at %s beats, not %s" % (clip_index, track.name, actual_start, expected_start))
+        return track_index, track, clip_index, clip
+
+    def _require_midi_clip(self, clip, clip_index):
+        kind = self._clip_kind(clip)
+        if kind != "midi":
+            raise BridgeError("CLIP_NOT_MIDI", "Arrangement clip %d is %s, not MIDI" % (clip_index, kind))
+
+    def _clip_notes(self, clip):
+        span = 16384.0
+        try:
+            span = max(span, float(clip.length) + 1.0)
+        except Exception:
+            pass
+        notes = []
+        for note in clip.get_notes_extended(0, 128, -8192.0, span):
+            notes.append(note)
+        return notes
+
+    def _note_payload(self, notes):
+        values = []
+        for note in notes:
+            values.extend([int(note.pitch), float(note.start_time), float(note.duration), float(note.velocity), bool(note.mute), int(note.note_id)])
+        return values
+
+    def _add_arrangement_notes(self, args):
+        _track_index, _track, clip_index, clip = self._arrangement_target(args)
+        self._require_midi_clip(clip, clip_index)
+        note_values = args[4:]
+        specs = self._note_specifications(note_values)
+        clip.add_new_notes(tuple(specs))
+
+    def _modify_arrangement_notes(self, args):
+        _track_index, _track, clip_index, clip = self._arrangement_target(args)
+        self._require_midi_clip(clip, clip_index)
+        mods = args[4:]
+        if not mods or len(mods) % 6 != 0:
+            raise BridgeError("INVALID_NOTES", "Note modifications must contain groups of id, pitch, start, duration, velocity, and mute")
+        if len(mods) // 6 > MAX_NOTES_PER_CALL:
+            raise BridgeError("INVALID_NOTES", "At most %d notes can be modified at once" % MAX_NOTES_PER_CALL)
+        by_id = {}
+        for note in self._clip_notes(clip):
+            note_id = int(note.note_id)
+            if note_id in by_id:
+                raise BridgeError("NOTE_ID_AMBIGUOUS", "Arrangement clip %d has more than one note with id %d" % (clip_index, note_id))
+            by_id[note_id] = note
+        changed = []
+        seen = set()
+        for offset in range(0, len(mods), 6):
+            note_id = self._whole_number(mods[offset], "note id", 0, 2 ** 53)
+            if note_id in seen:
+                raise BridgeError("NOTE_ID_AMBIGUOUS", "Note id %d was given more than once" % note_id)
+            seen.add(note_id)
+            note = by_id.get(note_id)
+            if note is None:
+                raise BridgeError("NOTE_NOT_FOUND", "No note with id %d in arrangement clip %d" % (note_id, clip_index))
+            pitch, start_time, duration, velocity = self._validated_note(mods[offset + 1], mods[offset + 2], mods[offset + 3], mods[offset + 4], 0)
+            note.pitch = pitch
+            note.start_time = start_time
+            note.duration = duration
+            note.velocity = float(velocity)
+            note.mute = bool(mods[offset + 5])
+            changed.append(note)
+        clip.apply_note_modifications(tuple(changed))
+
+    def _remove_arrangement_notes(self, args):
+        self._require_args(args, 8, "/live/arrangement_clip/remove/notes")
+        _track_index, _track, clip_index, clip = self._arrangement_target(args)
+        self._require_midi_clip(clip, clip_index)
+        from_pitch = self._whole_number(args[4], "fromPitch", 0, 127)
+        pitch_span = self._whole_number(args[5], "pitchSpan", 1, 128)
+        if from_pitch + pitch_span > 128:
+            raise BridgeError("INVALID_RANGE", "Pitch range must stay inside 0-127")
+        from_time = self._finite_float(args[6], "fromTime")
+        time_span = self._finite_float(args[7], "timeSpan")
+        if from_time < 0 or time_span <= 0:
+            raise BridgeError("INVALID_RANGE", "fromTime must be >= 0 and timeSpan must be positive")
+        matched = [note for note in self._clip_notes(clip) if self._note_starts_in_range(note, from_pitch, pitch_span, from_time, time_span)]
+        if not matched:
+            raise BridgeError("NOTE_NOT_FOUND", "No notes start in that pitch and time range on arrangement clip %d" % clip_index)
+        clip.remove_notes_extended(from_pitch, pitch_span, from_time, time_span)
+
+    def _note_specifications(self, note_values):
+        if not note_values or len(note_values) % 5 != 0:
+            raise BridgeError("INVALID_NOTES", "MIDI note data must contain groups of five values")
+        if len(note_values) // 5 > MAX_NOTES_PER_CALL:
+            raise BridgeError("INVALID_NOTES", "At most %d notes can be written at once" % MAX_NOTES_PER_CALL)
+        specs = []
+        for offset in range(0, len(note_values), 5):
+            pitch, start_time, duration, velocity = self._validated_note(note_values[offset], note_values[offset + 1], note_values[offset + 2], note_values[offset + 3], 1)
+            specs.append(Live.Clip.MidiNoteSpecification(
+                pitch=pitch, start_time=start_time, duration=duration, velocity=velocity, mute=bool(note_values[offset + 4])
+            ))
+        return specs
+
+    def _validated_note(self, pitch, start_time, duration, velocity, minimum_velocity):
+        pitch_number = self._whole_number(pitch, "pitch", 0, 127)
+        start_number = self._finite_float(start_time, "note start")
+        duration_number = self._finite_float(duration, "note duration")
+        if start_number < 0 or duration_number <= 0:
+            raise BridgeError("INVALID_NOTES", "Note start must be >= 0 and duration must be positive")
+        velocity_number = self._whole_number(velocity, "velocity", minimum_velocity, 127)
+        return pitch_number, start_number, duration_number, velocity_number
+
+    def _whole_number(self, value, label, low, high):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise BridgeError("INVALID_NOTES", "%s must be a number" % label)
+        number = float(value)
+        if number != number or not number.is_integer():
+            raise BridgeError("INVALID_NOTES", "%s must be an integer" % label)
+        whole = int(number)
+        if whole < low or whole > high:
+            raise BridgeError("INVALID_NOTES", "%s must be from %d to %d" % (label, low, high))
+        return whole
+
+    def _note_starts_in_range(self, note, from_pitch, pitch_span, from_time, time_span):
+        pitch = int(note.pitch)
+        start = float(note.start_time)
+        return from_pitch <= pitch < from_pitch + pitch_span and from_time <= start < from_time + time_span
 
     def _json_value(self, value):
         if value is None or isinstance(value, (str, int, float, bool)):
