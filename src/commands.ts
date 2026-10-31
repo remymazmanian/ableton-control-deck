@@ -1,4 +1,5 @@
 import { JsonLogger } from "./logger.js";
+import { findMissingNotes, parseNoteReply } from "./notes.js";
 import { sceneIndexSchema, tempoSchema, trackIndexSchema, validateNotes } from "./validation.js";
 import { oscFloat, oscInt, type LiveControlClient, type MidiNote, type OscArgument, type ToolResult } from "./types.js";
 
@@ -106,7 +107,13 @@ export class AbletonCommands {
     for (const n of valid) flat.push(oscInt(n.pitch), oscFloat(n.startTime), oscFloat(n.duration), oscInt(n.velocity), n.mute);
     return this.run("add_midi_notes", { trackIndex, sceneIndex, notes: valid, dryRun }, { address: "/live/clip/add/notes", args: flat }, dryRun, async () => {
       const reply = await this.live.query("/live/clip/get/notes", [oscInt(trackIndex), oscInt(sceneIndex)]);
-      return { trackIndex, sceneIndex, noteCountRequested: valid.length, notesReply: reply.args };
+      const actual = parseNoteReply(reply.args, trackIndex, sceneIndex);
+      const missing = findMissingNotes(valid, actual);
+      if (missing.length > 0) {
+        const shown = missing.slice(0, 5).map(n => `pitch ${n.pitch} at ${n.startTime} (duration ${n.duration}, velocity ${n.velocity}${n.mute ? ", muted" : ""})`).join("; ");
+        throw new Error(`Note verification failed: ${missing.length} of ${valid.length} requested notes are not in clip ${trackIndex}:${sceneIndex} after writing. Missing: ${shown}${missing.length > 5 ? "; ..." : ""}`);
+      }
+      return { trackIndex, sceneIndex, noteCountRequested: valid.length, noteCountVerified: valid.length, noteCountInClip: actual.length };
     });
   }
 
