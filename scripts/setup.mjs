@@ -256,6 +256,6 @@ heading("Setup complete. Two steps left:");
 console.log(`
   1. Open Live → Settings → Link, Tempo & MIDI and pick “Control Deck” as a
      Control Surface (restart Live first if it was open during setup).
-  2. Connect your AI agent: open http://127.0.0.1:50713/connect for
+  2. Connect your SI agent: open http://127.0.0.1:50713/connect for
      copy-paste instructions for Claude Code, Codex, and every other client.
 `);
