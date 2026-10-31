@@ -42,9 +42,10 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 - Control a fully indexed VST3 instrument through OmniHost, past Live's parameter ceiling
 - Search a local sample index by keyword, folder, BPM, key, duration, and tags
 - List, add, rename, and delete Arrangement locators; adding or deleting one needs playback stopped and puts the playhead back afterwards
-- List a track's Arrangement clips with start, end, name, and MIDI or audio type; tile a Session clip into the Arrangement over a beat range; and clear a track's Arrangement (confirmation required)
-- Create an empty Arrangement MIDI clip on Live 12.1.10 or newer, then read, add, change, or remove its notes. Every write is read back.
-- Load a User Library item, such as a saved Instrument Rack holding Pigments or Serum 2, by exact name. A preset file path on disk is refused.
+- `list_arrangement_clips` lists a track's Arrangement clips with start, end, name, and whether each clip is MIDI or audio. You can still tile a Session clip into the Arrangement, and clear a track's Arrangement when you confirm it.
+- `create_arrangement_midi_clip` creates an empty MIDI clip in the Arrangement. It works with Live 12.1.10 or newer. You pass the track's index and its current name; if that name does not match, nothing is created, and the new clip is read back.
+- `get_arrangement_clip_notes`, `add_arrangement_clip_notes`, `modify_arrangement_clip_notes`, and `remove_arrangement_clip_notes` read, add, change, and remove notes on an Arrangement MIDI clip. The same track-name check applies, and every write is read back from Live.
+- `load_user_library_item` loads a saved User Library item, such as an Instrument Rack that holds Pigments or Serum 2, by its exact name onto a track you name exactly. A preset file sitting on disk, such as a `.vstpreset`, is refused.
 
 ## Requirements
 
