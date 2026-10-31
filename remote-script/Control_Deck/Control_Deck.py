@@ -14,7 +14,7 @@ from .bridge_core import BridgeError, filter_plugins, format_from_path, public_p
 
 
 SCRIPT_NAME = "Control Deck Bridge"
-SCRIPT_VERSION = "1.1.0"
+SCRIPT_VERSION = "1.2.0"
 PROTOCOL = "ableton-control-deck/1"
 HOST = "127.0.0.1"
 PORT = 50711
