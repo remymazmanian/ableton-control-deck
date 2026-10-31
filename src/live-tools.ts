@@ -1,3 +1,4 @@
+import { parseArrangementClips, type ArrangementClipDescriptor } from "./arrangement-clips.js";
 import { JsonLogger } from "./logger.js";
 import { oscFloat, oscInt, type LiveControlClient, type OscArgument, type ToolResult } from "./types.js";
 import { trackIndexSchema } from "./validation.js";
@@ -295,11 +296,9 @@ export class LiveTools {
     return cues.sort((a, b) => a.timeBeats - b.timeBeats);
   }
 
-  private async arrangementClips(trackIndex: number): Promise<Array<{ name: string; startBeats: number; endBeats: number }>> {
-    const values = (await this.live.query("/live/track/get/arrangement_clips", [oscInt(trackIndex)])).args.slice(1);
-    const clips = [];
-    for (let i = 0; i + 2 < values.length; i += 3) clips.push({ name: String(values[i]), startBeats: Number(values[i + 1]), endBeats: Number(values[i + 2]) });
-    return clips;
+  private async arrangementClips(trackIndex: number): Promise<ArrangementClipDescriptor[]> {
+    const reply = await this.live.query("/live/track/get/arrangement_clips", [oscInt(trackIndex)]);
+    return parseArrangementClips(reply.args, trackIndex);
   }
 
   listLocators(): Promise<ToolResult> {

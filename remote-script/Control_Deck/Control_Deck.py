@@ -188,7 +188,7 @@ class ControlDeckBridge(ControlSurface):
             track_index, track = self._track(args)
             values = [track_index]
             for clip in track.arrangement_clips:
-                values.extend([clip.name, clip.start_time, clip.end_time])
+                values.extend([clip.name, clip.start_time, clip.end_time, self._clip_kind(clip)])
         elif address == "/live/application/get/version":
             application = self.application()
             values = [application.get_major_version(), application.get_minor_version()]
@@ -449,6 +449,21 @@ class ControlDeckBridge(ControlSurface):
         if parameter_index < 0:
             raise BridgeError("INVALID_PARAMETER", "Parameter index must be non-negative")
         return parameter_index, parameter
+
+    def _clip_kind(self, clip):
+        midi = self._clip_flag(clip, "is_midi_clip")
+        audio = self._clip_flag(clip, "is_audio_clip")
+        if midi and not audio:
+            return "midi"
+        if audio and not midi:
+            return "audio"
+        return "unknown"
+
+    def _clip_flag(self, clip, name):
+        try:
+            return bool(getattr(clip, name))
+        except Exception:
+            return False
 
     def _json_value(self, value):
         if value is None or isinstance(value, (str, int, float, bool)):

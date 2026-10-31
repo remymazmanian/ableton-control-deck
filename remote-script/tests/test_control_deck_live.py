@@ -92,6 +92,7 @@ class Track(object):
         self.mixer_device = types.SimpleNamespace(volume=Parameter("Volume", 0.85), panning=Parameter("Pan", 0.0, -1.0, 1.0))
         self.clip_slots = [Slot()]
         self.devices = [Device()]
+        self.arrangement_clips = []
 
 
 class Song(object):
@@ -141,6 +142,14 @@ class ControlDeckLiveTests(unittest.TestCase):
         self.assertEqual(len(self.song.tracks), 2)
         with self.assertRaises(Exception):
             self.bridge._live_command({"address": "/live/song/save_as", "args": ["unsafe.als"]})
+
+    def test_lists_arrangement_clips_with_midi_or_audio_kind(self):
+        self.song.tracks[0].arrangement_clips = [
+            types.SimpleNamespace(name="Beat", start_time=0.0, end_time=4.0, is_midi_clip=True, is_audio_clip=False),
+            types.SimpleNamespace(name="Room", start_time=4.0, end_time=8.0, is_midi_clip=False, is_audio_clip=True),
+        ]
+        listed = self.bridge._live_query({"address": "/live/track/get/arrangement_clips", "args": [0]})
+        self.assertEqual(listed["args"], [0, "Beat", 0.0, 4.0, "midi", "Room", 4.0, 8.0, "audio"])
 
     def test_creates_clip_and_validated_note_objects(self):
         self.bridge._live_command({"address": "/live/clip_slot/create_clip", "args": [0, 0, 4.0]})

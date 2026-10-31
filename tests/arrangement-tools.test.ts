@@ -4,7 +4,7 @@ import { LiveTools } from "../src/live-tools.js";
 const logger = { write: vi.fn() };
 
 /** A small stand-in for Live: locators, the playhead, transport and Arrangement clips. */
-function fakeLive(state: { cues?: Array<[string, number]>; playhead?: number; playing?: boolean; clips?: Array<[string, number, number]>; sessionClipLength?: number } = {}) {
+function fakeLive(state: { cues?: Array<[string, number]>; playhead?: number; playing?: boolean; clips?: Array<[string, number, number, string]>; sessionClipLength?: number } = {}) {
   const live = {
     cues: [...(state.cues ?? [])],
     playhead: state.playhead ?? 0,
@@ -22,7 +22,7 @@ function fakeLive(state: { cues?: Array<[string, number]>; playhead?: number; pl
       if (address === "/live/track/clear_arrangement") live.clips = [];
       if (address === "/live/clip/fill_arrangement") {
         const step = state.sessionClipLength ?? 4;
-        for (let p = Number(v[2]); p < Number(v[3]) - 0.0001; p += step) live.clips.push(["Loop", p, p + step]);
+        for (let p = Number(v[2]); p < Number(v[3]) - 0.0001; p += step) live.clips.push(["Loop", p, p + step, "midi"]);
       }
     }),
     query: vi.fn(async (address: string) => {
@@ -82,6 +82,22 @@ describe("locators", () => {
 });
 
 describe("arrangement clips", () => {
+  it("lists each clip with its arrangement index and MIDI or audio type", async () => {
+    const live = fakeLive({ clips: [["Beat", 0, 4, "midi"], ["Room", 4, 8, "audio"]] });
+    const result = await new LiveTools(live as never, logger as never).listArrangementClips(0);
+    expect(result).toMatchObject({ ok: true, data: { trackName: "Drums", clips: [
+      { index: 0, name: "Beat", startBeats: 0, endBeats: 4, lengthBeats: 4, kind: "midi" },
+      { index: 1, name: "Room", startBeats: 4, endBeats: 8, lengthBeats: 4, kind: "audio" }
+    ] } });
+  });
+
+  it("refuses an arrangement clip reply that has no type", async () => {
+    const live = fakeLive();
+    live.query.mockResolvedValue({ args: [0, "Beat", 0, 4] });
+    const result = await new LiveTools(live as never, logger as never).listArrangementClips(0);
+    expect(result).toMatchObject({ ok: false, error: { message: expect.stringMatching(/clip type/) } });
+  });
+
   it("tiles a Session clip across a range and reports the copies", async () => {
     const live = fakeLive({ sessionClipLength: 4 });
     const result = await new LiveTools(live as never, logger as never).placeClipInArrangement({ trackIndex: 0, sceneIndex: 1, startBeats: 0, endBeats: 16 });
@@ -95,7 +111,7 @@ describe("arrangement clips", () => {
   });
 
   it("requires confirm=true to clear a track's Arrangement", async () => {
-    const live = fakeLive({ clips: [["Loop", 0, 4]] });
+    const live = fakeLive({ clips: [["Loop", 0, 4, "midi"]] });
     const tools = new LiveTools(live as never, logger as never);
     expect(() => tools.clearArrangementTrack(0, false)).toThrow(/confirm=true/);
     expect(live.send).not.toHaveBeenCalled();
