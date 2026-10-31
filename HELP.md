@@ -30,7 +30,7 @@ Everything about installing, using, troubleshooting, and understanding Ableton C
 
 Ableton Control Deck lets an AI agent operate Ableton Live the way a careful engineer would: every action names its exact target, ambiguous requests are refused, and every change is read back from Live before being reported as done. It speaks the [Model Context Protocol](https://modelcontextprotocol.io) (MCP), the open standard used by Claude Code, Claude Desktop, Codex, Cursor, Gemini CLI, and most other AI agents — including fully local LLM setups.
 
-It is not a remote-control surface, a preset manager, or a cloud service. It is a precision bridge between an agent's intent and Live's remote-script API, plus a local dashboard for watching what's happening.
+It is not a remote-control surface or a cloud service. It can load a User Library rack by exact name, and it cannot load a preset file from disk. It is a precision bridge between an agent's intent and Live's remote-script API, plus a local dashboard for watching what's happening.
 
 ## Compatibility
 
@@ -39,7 +39,7 @@ It is not a remote-control surface, a preset manager, or a cloud service. It is 
 | Requirement | Minimum |
 |---|---|
 | macOS | 13 Ventura or newer (Apple silicon and Intel) |
-| Ableton Live | 11 or newer (tested target: Live 12) |
+| Ableton Live | 11 or newer (tested target: Live 12). Arrangement MIDI clip creation needs 12.1.10 or newer and fails clearly on older versions. |
 | Node.js | 20 or newer |
 | Max for Live | optional — only for the OmniHost device |
 | Xcode Command Line Tools | optional — only for the native wrapper app |
@@ -141,6 +141,50 @@ All tools follow the same contract: **exact targets** (mutations require indices
 - **create_midi_clip** — Create a Session View MIDI clip with an exact beat length.
 - **add_midi_notes** — Validate and add MIDI notes to a Session View clip. Pitches accept integers or Ableton-style note names (`C3` is MIDI 60).
 
+### Arrangement
+
+Note times below are beats from the start of the clip. Clip `startBeats` is the position in the Arrangement. `clipIndex` is the position in that track's `arrangement_clips` list, which `list_arrangement_clips` reports. Pass `clipIndex`, `startBeats`, or both. Both must describe the same clip. A start time that matches more than one clip is refused.
+
+- **list_locators / add_locator / delete_locator** — List, create, or delete Arrangement locators (cue points). Adding or deleting one needs playback stopped. Live changes the locator at the playhead, so the bridge moves the playhead, waits until Live reports it there, makes the change, and puts the playhead back. Adding a locator where one already exists renames it.
+- **list_arrangement_clips** — List one track's Arrangement clips with `index`, `name`, `startBeats`, `endBeats`, `lengthBeats` (end minus start), and `kind` (`midi` or `audio`).
+- **create_arrangement_midi_clip** — Create an empty MIDI clip in the Arrangement with `Track.create_midi_clip(start_time, length)`. Needs Live 12.1.10 or newer. Pass the track index and its current name. `startBeats` is where the clip starts and `lengthBeats` is its length, not its end time. An optional `name` is read back. Overlap, a non-MIDI track, a frozen track, and recording into the track fail clearly. Older Live versions fail with a message that names the running version and 12.1.10.
+- **place_clip_in_arrangement** — Copy a Session clip into the Arrangement, tiled back to back from `startBeats` until `endBeats`, and confirm the copies. Each copy is the full clip, so the last one can run past `endBeats`. Ranges that would need more than 512 copies are refused.
+- **clear_arrangement_track** — Delete every Arrangement clip on one track. `confirm: true` is mandatory.
+- **get_arrangement_clip_notes** — Read every note in one Arrangement MIDI clip, including `noteId`, pitch, start, duration, velocity, and mute.
+- **add_arrangement_clip_notes** — Add notes, then read the clip back. The call fails if any requested note is missing or different. One note already in the clip can satisfy only one requested note. Pitches accept integers or note names (`C3` is MIDI 60). At most 256 notes per call.
+- **modify_arrangement_clip_notes** — Change existing notes by `noteId` (`Clip.apply_note_modifications`). Omit a field to leave it alone. The clip is read back and each changed note must match.
+- **remove_arrangement_clip_notes** — Remove notes whose start lies in a pitch and time range (`Clip.remove_notes_extended`). `fromTime` is inclusive and `fromTime + timeSpan` is exclusive. `pitchSpan` counts pitches starting at `fromPitch`. The call fails when the range matches nothing. Notes outside the range must still be there afterward.
+
+```json
+{ "tool": "list_arrangement_clips", "arguments": { "trackIndex": 0 } }
+```
+
+```json
+{ "tool": "create_arrangement_midi_clip", "arguments": { "trackIndex": 1, "expectedTrackName": "Bass", "startBeats": 8, "lengthBeats": 4, "name": "Hook" } }
+```
+
+That asks for a 4-beat MIDI clip starting at beat 8, so it ends at beat 12. A second argument of 4 is the length, not an end time of 4.
+
+```json
+{ "tool": "get_arrangement_clip_notes", "arguments": { "trackIndex": 1, "expectedTrackName": "Bass", "startBeats": 8 } }
+```
+
+```json
+{ "tool": "add_arrangement_clip_notes", "arguments": { "trackIndex": 1, "expectedTrackName": "Bass", "clipIndex": 0, "startBeats": 8, "notes": [{ "pitch": "C3", "startTime": 0, "duration": 1, "velocity": 100 }, { "pitch": 67, "startTime": 1, "duration": 0.5, "velocity": 90, "mute": false }] } }
+```
+
+```json
+{ "tool": "modify_arrangement_clip_notes", "arguments": { "trackIndex": 1, "expectedTrackName": "Bass", "clipIndex": 0, "notes": [{ "noteId": 1, "pitch": "G3" }] } }
+```
+
+`noteId` comes from `get_arrangement_clip_notes`. Here only the pitch changes.
+
+```json
+{ "tool": "remove_arrangement_clip_notes", "arguments": { "trackIndex": 1, "expectedTrackName": "Bass", "clipIndex": 0, "fromPitch": 60, "pitchSpan": 1, "fromTime": 0, "timeSpan": 1 } }
+```
+
+That removes notes of pitch 60 (C3) whose start is in the half-open beat range `[0, 1)`.
+
 ### Devices & parameters
 
 - **list_devices** — List top-level devices on a track.
@@ -160,6 +204,13 @@ All tools follow the same contract: **exact targets** (mutations require indices
 - **load_plugin / load_plugin_on_track** — Load a resolved plug-in on an explicit track and verify the device chain grew. Requires the track's current name; an exact resolved path disambiguates duplicates.
 - **find_live_device** — Resolve the exact Browser path for a native Live device from the Instruments, Audio Effects, MIDI Effects, or Drums categories.
 - **load_live_device** — Load a native Live device (Drum Rack, Echo, Reverb, ...) on an explicit track through Live's Browser, refusing ambiguous names and verifying the device chain.
+- **load_user_library_item** — Load a User Library item onto an exact track by its exact Browser name, then read the device chain back. This is how a saved Instrument Rack (`.adg`) or device preset (`.adv`) is loaded, including a rack that holds Pigments or Serum 2 with a patch. If more than one item has that name, the call fails and returns the Browser paths. Pass one of those paths as `path` to choose. `path` is a Live Browser path such as `User Library/Presets/Instruments/My Serum Rack`, not a file on disk.
+
+```json
+{ "tool": "load_user_library_item", "arguments": { "trackIndex": 1, "expectedTrackName": "Bass", "name": "Serum 2 Bass Rack" } }
+```
+
+Live's browser API loads a Browser item. It cannot load a `.vstpreset`, `.aupreset`, `.fxp`, or `.fxb` from a filesystem path, and Control Deck refuses those paths instead of copying files into the User Library. Save the patch inside an Instrument Rack (`.adg`) or as a device preset (`.adv`) in the User Library, then load that item by exact name. If Live already lists a preset file as a User Library Browser item, the same tool can load it by that item's exact name. The device chain has to change (a new device, or a device whose name or class changed). A load that leaves the chain identical fails verification. `load_device_preset`, `load_instrument_rack`, `load_drum_rack`, and `load_effect_rack` stay path-based stubs.
 
 The recommended loading sequence: `plugin_loader_status` → `list_installed_plugins` → `find_plugin` (save the resolved path) → `list_tracks` → `load_plugin` with index, current track name, exact plug-in name/format, and the resolved path. Duplicate names are refused with candidate paths instead of guessed at.
 
@@ -181,8 +232,8 @@ The recommended loading sequence: `plugin_loader_status` → `list_installed_plu
 ### Templates & capability stubs
 
 - **list_templates** — List user-configured templates, racks, presets, and device chains from `config/templates.json`.
-- **load_track_template / load_device_preset / load_drum_rack / load_instrument_rack / load_effect_rack** — Honest stubs: the current bridge API cannot load these; each returns a structured `UNSUPPORTED_CAPABILITY` error instead of pretending.
-- **get_project_path / get_unsaved_status / save_live_set / save_live_set_as** — Stubs for the same reason: Live's remote-script API does not expose document paths or save commands, and UI automation is intentionally disabled.
+- **load_track_template / load_device_preset / load_drum_rack / load_instrument_rack / load_effect_rack** — Path-based stubs. Each still returns `UNSUPPORTED_CAPABILITY`. Load a saved rack with `load_user_library_item` and its exact User Library name instead.
+- **get_project_path / get_unsaved_status / save_live_set / save_live_set_as** — Stubs: Live's remote-script API does not expose document paths or save commands, and UI automation is intentionally disabled. Rendering is unavailable for the same reason.
 - **create_project_version** — Proposes a collision-safe version filename; the save itself remains manual.
 
 ## OmniHost
@@ -293,8 +344,11 @@ Then delete the install folder, remove the wrapper app from `/Applications` if y
 - **Track identity is index-plus-name.** Indices shift when tracks are inserted or deleted, which is exactly why every mutation also requires the current name.
 - **Device traversal covers top-level track devices**, not devices nested inside racks.
 - **No proprietary plug-in UI control.** Control Deck can instantiate plug-ins and set the parameters they expose; it cannot manipulate vendor UIs or parameters kept hidden from Live (OmniHost exists to widen that surface for one hosted instrument).
-- **Native device loading covers devices, not presets.** `load_live_device` resolves items under Instruments, Audio Effects, MIDI Effects, and Drums by exact name; it deliberately refuses fuzzy matches, and preset browsing stays out of scope.
-- **No Arrangement View creation, no audio preview, no template/rack loading, no save/save-as** — the remote-script API doesn't expose them, and the tools say so honestly instead of automating the UI.
+- **Native device loading covers devices, not factory preset browsers.** `load_live_device` resolves items under Instruments, Audio Effects, MIDI Effects, and Drums by exact name and refuses fuzzy matches. A saved User Library rack is a separate tool, `load_user_library_item`.
+- **Arrangement MIDI clips can be created on Live 12.1.10 and newer.** `create_arrangement_midi_clip` calls `Track.create_midi_clip(start_time, length)` and reads the clip back. Older Live versions fail by name. Session clips can still be copied into the Arrangement with `place_clip_in_arrangement`.
+- **Arrangement automation, saving the Live Set, and rendering are not available** through the API. Control Deck does not fake them with UI automation.
+- **Preset files on disk are not loaded.** `.vstpreset`, `.aupreset`, `.fxp`, and `.fxb` paths are refused. Use a User Library `.adg` or `.adv`, selected by exact name.
+- **No audio preview.** The API does not preview samples, and Control Deck does not automate the UI to do it.
 - **Live API coupling.** The bridge uses Live's Python remote-script API, so a future Live update could require a compatible Control Deck release.
 
 ## FAQ
@@ -305,8 +359,11 @@ Yes — any MCP client. The Connect page has per-client snippets. For local LLMs
 **Can claude.ai or ChatGPT control it from the cloud via a connector?**
 Not out of the box, deliberately: connectors expect a public HTTPS endpoint, and Control Deck is loopback-only. It can be bridged with a stdio→HTTP gateway plus a tunnel, but that makes your DAW internet-reachable and the bridge secret does not protect the HTTP side — you'd need real endpoint auth, an always-awake Mac, and tolerance for cloud round-trip latency. If you need other-device access, a private overlay network (e.g. plain Tailscale) is the sane middle ground. Local agents over stdio are the supported path.
 
-**Why won't it save my project or load presets?**
-Because Live's remote-script API doesn't expose those operations, and Control Deck refuses to fake them with UI automation. The capability stubs return structured errors so agents know exactly where the boundary is.
+**Why won't it save or render my project?**
+Saving the Live Set and rendering audio are not available through Live's remote-script API. Arrangement automation is not available either. Control Deck does not drive the UI to fake them. `save_live_set` and `save_live_set_as` return `UNSUPPORTED_CAPABILITY`.
+
+**Can it load a Pigments or Serum 2 patch?**
+Save the patch inside an Instrument Rack (`.adg`) in the User Library, then call `load_user_library_item` with that rack's exact name plus the track index and current track name. If several items share the name, the call refuses and lists their Browser paths; pass one path back to choose. A `.vstpreset` or `.aupreset` path on disk is refused, because the API accepts a Browser item and not a file path.
 
 **Does it phone home, collect telemetry, or need an account?**
 No, no, and no.
