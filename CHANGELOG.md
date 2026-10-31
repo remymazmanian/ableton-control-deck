@@ -13,13 +13,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 
 - `modify_arrangement_clip_notes` passes the note vector from `get_notes_extended` to `Clip.apply_note_modifications`. Live 12.4.16 rejects a tuple.
+- `create_arrangement_midi_clip` refuses an overlapping range before calling Live, and names the clip already there. Live 12.4 trims the existing clip instead of raising, so the bridge must not create in that case.
 
 ### Changed
 
 - `list_arrangement_clips` now includes each clip's index, length, and whether it is MIDI or audio.
 - Documented limits stay in place for what the API still cannot do: arrangement automation, saving the Live Set, and rendering. Arrangement MIDI clip creation is available on Live 12.1.10 and newer.
 
-These Arrangement and User Library tools are covered by automated tests against a stand-in for Live. They still need a check in Live 12.1.10 or newer.
+Arrangement clip creation, note add/remove, and a unique User Library `.adv` load were checked in Live 12.4.16. Frozen tracks, recording into a track, audio-clip note refusal, a duplicate User Library name, and a Pigments or Serum 2 rack still need a check.
 
 ## [1.1.0] - 2026-10-11
 

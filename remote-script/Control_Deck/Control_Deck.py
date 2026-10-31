@@ -486,6 +486,12 @@ class ControlDeckBridge(ControlSurface):
         create = getattr(track, "create_midi_clip", None)
         if not callable(create):
             raise BridgeError("LIVE_VERSION_UNSUPPORTED", "Track.create_midi_clip is not available in this Live (%s). It needs Live 12.1.10 or newer." % self._live_version_text())
+        # Live 12.4 trims an overlapping Arrangement clip instead of raising.
+        # Refuse before create_midi_clip so an existing clip is never shortened.
+        end = start + length
+        overlaps = [clip for clip in track.arrangement_clips if self._arrangement_ranges_overlap(start, end, float(clip.start_time), float(clip.end_time))]
+        if overlaps:
+            raise BridgeError("CLIP_OVERLAP", self._overlap_message(start, end, overlaps))
         try:
             created = create(start, length)
         except BridgeError:
@@ -536,6 +542,30 @@ class ControlDeckBridge(ControlSurface):
         if value is None or isinstance(value, (int, float, bool, str)):
             return False
         return hasattr(value, "start_time") and hasattr(value, "name")
+
+    def _arrangement_ranges_overlap(self, start, end, clip_start, clip_end):
+        # Half-open beat ranges. Clips that only touch at an endpoint do not overlap.
+        return start < clip_end - 1e-6 and end > clip_start + 1e-6
+
+    def _overlap_message(self, start, end, clips):
+        labels = [self._arrangement_clip_label(clip) for clip in clips[:5]]
+        extra = "" if len(clips) <= 5 else " and %d more" % (len(clips) - 5)
+        return "Refusing to create an arrangement MIDI clip from %s to %s beats because it overlaps %s%s. Existing clips were not changed." % (
+            self._beat_text(start), self._beat_text(end), ", ".join(labels), extra
+        )
+
+    def _arrangement_clip_label(self, clip):
+        span = "%s to %s beats" % (self._beat_text(clip.start_time), self._beat_text(clip.end_time))
+        name = str(getattr(clip, "name", "") or "").strip()
+        if name:
+            return "'%s' (%s)" % (name, span)
+        return span
+
+    def _beat_text(self, value):
+        number = float(value)
+        if abs(number - round(number)) < 0.001:
+            return str(int(round(number)))
+        return ("%.4f" % number).rstrip("0").rstrip(".")
 
     def _arrangement_clips_at(self, track, start, length):
         end = start + length

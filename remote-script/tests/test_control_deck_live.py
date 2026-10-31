@@ -158,12 +158,23 @@ class Track(object):
         self.arrangement_clips = []
 
     def create_midi_clip(self, start, length):
+        # Live 12.4.16 does not raise on overlap. It trims the existing clip, then inserts.
         start = float(start)
         length = float(length)
         end = start + length
-        for clip in self.arrangement_clips:
-            if start < float(clip.end_time) and end > float(clip.start_time):
-                raise RuntimeError("Clip overlaps with an existing arrangement clip")
+        for clip in list(self.arrangement_clips):
+            clip_start = float(clip.start_time)
+            clip_end = float(clip.end_time)
+            if not (start < clip_end and end > clip_start):
+                continue
+            if clip_start < start < clip_end:
+                clip.end_time = start
+                clip.length = start - clip_start
+            elif clip_start < end < clip_end:
+                clip.start_time = end
+                clip.length = clip_end - end
+            else:
+                self.arrangement_clips.remove(clip)
         created = ArrangementClip("", start, end, True)
         self.arrangement_clips.append(created)
         self.arrangement_clips.sort(key=lambda clip: float(clip.start_time))
@@ -230,11 +241,20 @@ class ControlDeckLiveTests(unittest.TestCase):
             self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Bass", 0.0, 4.0]})
         self.assertIn("Bass", str(mismatch.exception))
         self.assertEqual(self.song.tracks[0].arrangement_clips, [])
-        self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 0.0, 4.0]})
+        self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 8.0, 4.0, "Hook"]})
         with self.assertRaises(Exception) as overlap:
-            self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 2.0, 4.0]})
-        self.assertIn("occupies", str(overlap.exception))
-        self.assertEqual(len(self.song.tracks[0].arrangement_clips), 1)
+            self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 10.0, 4.0, "Next"]})
+        self.assertIn("Hook", str(overlap.exception))
+        self.assertIn("8 to 12", str(overlap.exception))
+        clips = self.song.tracks[0].arrangement_clips
+        self.assertEqual(len(clips), 1)
+        self.assertEqual((clips[0].name, clips[0].start_time, clips[0].end_time), ("Hook", 8.0, 12.0))
+
+    def test_adjacent_arrangement_clips_are_not_an_overlap(self):
+        self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 8.0, 4.0, "Hook"]})
+        self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 12.0, 4.0, "Next"]})
+        clips = [(clip.name, clip.start_time, clip.end_time) for clip in self.song.tracks[0].arrangement_clips]
+        self.assertEqual(clips, [("Hook", 8.0, 12.0), ("Next", 12.0, 16.0)])
 
     def test_names_the_new_clip_when_create_midi_clip_returns_a_zero_id(self):
         # Live 12.1.10 created the clip but returned id 0. Naming must follow the clip, not that id.
