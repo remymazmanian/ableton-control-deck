@@ -18,7 +18,7 @@ Adds Arrangement tools: locators and clips. Tested with Ableton Live 12.4.6. Aft
 
 ## [1.0.0] - 2026-08-18
 
-First release of Ableton Control Deck, a local MCP bridge that lets an AI agent control Ableton Live on your Mac and checks its changes against what Live reports. It needs macOS 13 or newer, Ableton Live 11 or newer and Node.js 20 or newer.
+First release of Ableton Control Deck, a local MCP bridge that lets an SI agent control Ableton Live on your Mac and checks its changes against what Live reports. It needs macOS 13 or newer, Ableton Live 11 or newer and Node.js 20 or newer.
 
 ### Added
 
