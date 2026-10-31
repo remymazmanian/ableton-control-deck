@@ -4,6 +4,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-31
+
+Arrangement MIDI clips, Arrangement note editing, and User Library loading. Tested with Ableton Live 12.4.16. After updating, restart Live so it loads the new remote script.
+
+In Live 12.4.16 these all passed: arrangement clip creation, name-mismatch and audio-track refusals, note add/get/modify/remove, overlap refusal with touching clips allowed, .vstpreset refusal, and loading a unique User Library .adv. Still unchecked: frozen tracks, recording into a track, audio-clip note refusal, a duplicate User Library name, and a Pigments or Serum 2 rack.
+
 ### Added
 
 - `create_arrangement_midi_clip` creates an empty MIDI clip in the Arrangement with `Track.create_midi_clip(start_time, length)` on Live 12.1.10 or newer. It checks the track index and current name, then reads the clip back. Older Live versions fail with a message that names the running version.
@@ -19,8 +25,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - `list_arrangement_clips` now includes each clip's index, length, and whether it is MIDI or audio.
 - Documented limits stay in place for what the API still cannot do: arrangement automation, saving the Live Set, and rendering. Arrangement MIDI clip creation is available on Live 12.1.10 and newer.
-
-Arrangement clip creation, note add/remove, and a unique User Library `.adv` load were checked in Live 12.4.16. Frozen tracks, recording into a track, audio-clip note refusal, a duplicate User Library name, and a Pigments or Serum 2 rack still need a check.
 
 ## [1.1.0] - 2026-10-11
 
@@ -51,6 +55,7 @@ First release of Ableton Control Deck, a local MCP bridge that lets an SI agent 
 - Local dashboard at `http://127.0.0.1:50713` showing bridge health, the current Live session, the selected track's devices and a searchable inventory of installed plug-ins. Its Connect page has copy-paste setup guides for Claude Code, Codex, Cursor, VS Code, Gemini CLI, local LLM setups and other MCP clients.
 - Local operation: the Live bridge, status service and dashboard listen on this Mac only, requests to the Live bridge must carry a secret generated for your install, and requests are logged locally to `logs/control-deck.jsonl`.
 
-[Unreleased]: https://github.com/remymazmanian/ableton-control-deck/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/remymazmanian/ableton-control-deck/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/remymazmanian/ableton-control-deck/releases/tag/v1.2.0
 [1.1.0]: https://github.com/remymazmanian/ableton-control-deck/releases/tag/v1.1.0
 [1.0.0]: https://github.com/remymazmanian/ableton-control-deck/releases/tag/v1.0.0
