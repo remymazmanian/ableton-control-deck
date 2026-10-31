@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 // that both pages actually render.
 
 const dashboardRoot = fileURLToPath(new URL("..", import.meta.url));
-const dashboardVersion = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
+const dashboardVersion = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version;
 const port = 43200 + (process.pid % 500);
 const baseUrl = `http://127.0.0.1:${port}`;
 let server;
@@ -19,12 +19,14 @@ async function fetchPage(pathname) {
 }
 
 function assertCreditFooter(html) {
-  assert.match(html, new RegExp(`Ableton Control Deck v${dashboardVersion.replace(/\./g, "\\.")}`));
-  assert.match(html, /Built by Remy Mazmanian/);
-  assert.match(html, /href="https:\/\/remymazmanian\.com\/ableton-control-deck\/"/);
-  assert.match(html, /target="_blank"/);
-  assert.match(html, /rel="noopener noreferrer"/);
-  assert.match(html, />remymazmanian\.com</);
+  const text = html.replace(/<!-- -->/g, "");
+  assert.match(text, new RegExp(`Ableton Control Deck v${dashboardVersion.replace(/\./g, "\\.")}`));
+  assert.match(text, /Built by Remy Mazmanian/);
+  assert.match(text, /href="https:\/\/remymazmanian\.com\/ableton-control-deck\/"/);
+  assert.match(text, /target="_blank"/);
+  assert.match(text, /rel="noopener noreferrer"/);
+  assert.match(text, />remymazmanian\.com</);
+  assert.doesNotMatch(text, /ABLETON CONTROL DECK · 1\.0/);
 }
 
 before(async () => {
