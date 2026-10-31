@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -7,6 +8,7 @@ import { fileURLToPath } from "node:url";
 // that both pages actually render.
 
 const dashboardRoot = fileURLToPath(new URL("..", import.meta.url));
+const dashboardVersion = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version;
 const port = 43200 + (process.pid % 500);
 const baseUrl = `http://127.0.0.1:${port}`;
 let server;
@@ -14,6 +16,17 @@ let server;
 async function fetchPage(pathname) {
   const response = await fetch(new URL(pathname, baseUrl), { headers: { accept: "text/html" } });
   return { response, html: await response.text() };
+}
+
+function assertCreditFooter(html) {
+  const text = html.replace(/<!-- -->/g, "");
+  assert.match(text, new RegExp(`Ableton Control Deck v${dashboardVersion.replace(/\./g, "\\.")}`));
+  assert.match(text, /Built by Remy Mazmanian/);
+  assert.match(text, /href="https:\/\/remymazmanian\.com\/ableton-control-deck\/"/);
+  assert.match(text, /target="_blank"/);
+  assert.match(text, /rel="noopener noreferrer"/);
+  assert.match(text, />remymazmanian\.com</);
+  assert.doesNotMatch(text, /ABLETON CONTROL DECK · 1\.0/);
 }
 
 before(async () => {
@@ -53,6 +66,7 @@ test("server-renders the control deck", async () => {
   assert.match(html, /Plug-in index/);
   assert.match(html, /Loaded devices/);
   assert.match(html, /LOCAL ONLY/);
+  assertCreditFooter(html);
   assert.doesNotMatch(html, /BHR|bhrstudio|chatgpt|codex|remyx/i);
 });
 
@@ -68,6 +82,7 @@ test("server-renders the connect page", async () => {
   assert.match(html, /Local LLMs/i);
   assert.match(html, /Remote connectors/i);
   assert.match(html, /mcpServers/);
+  assertCreditFooter(html);
   assert.doesNotMatch(html, /BHR|bhrstudio|remyx/i);
 });
 
@@ -78,5 +93,6 @@ test("server-renders the settings page", async () => {
   assert.match(html, /Bridge address/i);
   assert.match(html, /Plug-in library/i);
   assert.match(html, /SAVE SETTINGS/i);
+  assertCreditFooter(html);
   assert.doesNotMatch(html, /BHR|bhrstudio|chatgpt|codex|remyx/i);
 });

@@ -4,6 +4,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- The local dashboard shows a quiet footer on every page with the version, “Built by Remy Mazmanian”, and a link to remymazmanian.com.
+- The MCP server, the local status service, and the dashboard footer read their version from the root `package.json`. A check fails if the remote script, the macOS wrapper, the dashboard package, or the documented bridge log line disagree with that version.
+
 ## [1.2.0] - 2026-10-31
 
 Arrangement MIDI clips, Arrangement note editing, and User Library loading. Tested with Ableton Live 12.4.16. After updating, restart Live so it loads the new remote script.
