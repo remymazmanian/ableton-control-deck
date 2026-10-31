@@ -106,8 +106,12 @@ export class AbletonClient implements LiveControlClient {
     return this.request("plugins.refresh", {}, 30_000);
   }
 
-  loadUserDevice(input: { trackIndex: number; expectedTrackName: string; name: string }): Promise<Record<string, unknown>> {
+  loadUserDevice(input: { trackIndex: number; expectedTrackName: string; name: string; path?: string }): Promise<Record<string, unknown>> {
     return this.request("devices.load_user_item", input, 12_000);
+  }
+
+  resolveUserLibraryItem(name: string, path?: string): Promise<{ item: { name: string; path: string; kind: string } }> {
+    return this.request("devices.resolve_user_item", { name, ...(path ? { path } : {}) }, 12_000);
   }
 
   resolveBrowserDevice(name: string, path?: string): Promise<{ device: { name: string; path: string; kind: string } }> {

@@ -109,6 +109,49 @@ export class PluginTools {
     return result;
   }
 
+  async loadUserLibraryItem(input: { trackIndex: number; expectedTrackName: string; name: string; path?: string; dryRun?: boolean }): Promise<ToolResult> {
+    const started = performance.now();
+    if (!Number.isInteger(input.trackIndex) || input.trackIndex < 0) throw new Error("Track index must be a non-negative integer.");
+    if (!input.name.trim()) throw new Error("User Library item name must not be empty.");
+    assertBrowserPath(input.path);
+    const trackNames = (await this.live.query("/live/song/get/track_names")).args.map(String);
+    if (input.trackIndex >= trackNames.length) throw new Error(`Track index ${input.trackIndex} does not exist.`);
+    if (trackNames[input.trackIndex] !== input.expectedTrackName) throw new Error(`Track safeguard failed: expected '${input.expectedTrackName}', found '${trackNames[input.trackIndex]}'.`);
+    let resolved: { name: string; path: string; kind: string };
+    try {
+      resolved = (await this.bridge.resolveUserLibraryItem(input.name, input.path)).item;
+    } catch (error) {
+      return this.bridgeFailure("load_user_library_item", started, error);
+    }
+    const bridgeRequest = { trackIndex: input.trackIndex, expectedTrackName: trackNames[input.trackIndex], name: resolved.name, path: resolved.path };
+    if (input.dryRun || this.defaultDryRun) {
+      const result: ToolResult = { ok: true, dryRun: true, tool: "load_user_library_item", data: { trackIndex: input.trackIndex, trackName: trackNames[input.trackIndex], resolved }, intendedOperations: [{ address: "bridge://devices.load_user_item", args: [JSON.stringify(bridgeRequest)] }] };
+      await this.logger.write({ tool: "load_user_library_item", args: input, bridgeRequest, response: result.data, durationMs: performance.now() - started, success: true, dryRun: true });
+      return result;
+    }
+
+    const before = await this.getDevices(input.trackIndex);
+    const selectedTrackBefore = await this.getSelectedTrackIndex();
+    let acknowledgement: Record<string, unknown> | undefined;
+    let acknowledgementError: string | undefined;
+    try {
+      acknowledgement = await this.bridge.loadUserDevice(bridgeRequest);
+    } catch (error) {
+      acknowledgementError = error instanceof Error ? error.message : String(error);
+    }
+    const after = await this.waitForDeviceChain(input.trackIndex, before);
+    const selectionRestored = await this.restoreSelectedTrack(selectedTrackBefore, input.trackIndex);
+    const changed = deviceChainChanged(before, after);
+    if (!changed) {
+      const message = acknowledgementError ?? "Live acknowledged the load, but the device chain is unchanged. Save a Pigments or Serum 2 patch inside an Instrument Rack (.adg) so the rack appears as a new device.";
+      await this.logger.write({ tool: "load_user_library_item", args: input, bridgeRequest, response: acknowledgement, durationMs: performance.now() - started, success: false, error: message });
+      return { ok: false, dryRun: false, tool: "load_user_library_item", data: { devicesBefore: before, devicesAfter: after, acknowledgement, selectionRestored }, error: { code: "USER_LIBRARY_LOAD_NOT_VERIFIED", message } };
+    }
+    const result: ToolResult = { ok: true, dryRun: false, tool: "load_user_library_item", data: { trackIndex: input.trackIndex, trackName: trackNames[input.trackIndex], resolved, acknowledgement, acknowledgementReceived: Boolean(acknowledgement), acknowledgementError, devicesBefore: before, devicesAfter: after, deviceCountBefore: before.length, deviceCountAfter: after.length, selectedTrackBefore, selectionRestored, warnings: selectionRestored ? [] : ["Item loaded, but the prior selected track could not be restored."] } };
+    await this.logger.write({ tool: "load_user_library_item", args: input, bridgeRequest, response: result.data, durationMs: performance.now() - started, success: true });
+    return result;
+  }
+
   private async resolve(name: string, format: PluginFormat, expectedPath?: string): Promise<ResolvedPlugin> {
     return (await this.bridge.resolvePlugin(name, format, expectedPath)).plugin;
   }
@@ -117,6 +160,15 @@ export class PluginTools {
     const args = [oscInt(trackIndex)];
     const [names, classes] = await Promise.all([this.live.query("/live/track/get/devices/name", args), this.live.query("/live/track/get/devices/class_name", args)]);
     return names.args.slice(1).map((name, index) => ({ index, name: String(name), className: String(classes.args[index + 1]) }));
+  }
+
+  private async waitForDeviceChain(trackIndex: number, before: Array<{ name: string; className: string }>): Promise<Array<{ index: number; name: string; className: string }>> {
+    let latest = await this.getDevices(trackIndex);
+    for (let attempt = 0; attempt < 29 && !deviceChainChanged(before, latest); attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      latest = await this.getDevices(trackIndex);
+    }
+    return latest;
   }
 
   private async waitForDeviceCount(trackIndex: number, expected: number): Promise<Array<{ index: number; name: string; className: string }> | null> {
@@ -145,6 +197,14 @@ export class PluginTools {
     return false;
   }
 
+  private async bridgeFailure(tool: string, started: number, error: unknown): Promise<ToolResult> {
+    const message = error instanceof Error ? error.message : String(error);
+    const code = typeof (error as { code?: unknown })?.code === "string" ? (error as { code: string }).code : "BRIDGE_ERROR";
+    const details = (error as { details?: unknown })?.details;
+    await this.logger.write({ tool, durationMs: performance.now() - started, success: false, error: message });
+    return { ok: false, dryRun: false, tool, error: { code, message, ...(details !== undefined ? { details } : {}) } };
+  }
+
   private async read<T>(tool: string, operation: () => Promise<T>): Promise<ToolResult<T>> {
     const started = performance.now();
     try {
@@ -162,3 +222,17 @@ export class PluginTools {
 }
 
 function normalizePath(value: string): string { return value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase(); }
+
+export function assertBrowserPath(path: string | undefined): void {
+  if (path === undefined) return;
+  const text = path.trim();
+  if (!text) throw new Error("Browser path must not be empty.");
+  if (text.startsWith("/") || text.startsWith("~") || /^[A-Za-z]:[\\/]/.test(text)) {
+    throw new Error("path must be a Live Browser path such as 'User Library/Presets/Instruments/My Rack', not a file on disk. Save the patch as an Instrument Rack (.adg) or a device preset (.adv) in the User Library. Live's API cannot load a .vstpreset or .aupreset from a filesystem path.");
+  }
+}
+
+function deviceChainChanged(before: Array<{ name: string; className: string }>, after: Array<{ name: string; className: string }>): boolean {
+  if (before.length !== after.length) return true;
+  return after.some((device, index) => device.name !== before[index]?.name || device.className !== before[index]?.className);
+}

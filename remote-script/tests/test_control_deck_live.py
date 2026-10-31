@@ -366,6 +366,23 @@ class ControlDeckLiveTests(unittest.TestCase):
         self.assertEqual(loaded, [item])
         self.assertEqual(result["loaded"]["path"], "User Library/Control Deck/Control Deck OmniHost")
 
+        other = types.SimpleNamespace(name="Pad", children=[], is_loadable=True)
+        duplicate = types.SimpleNamespace(name="Pad", children=[], is_loadable=True)
+        folder.children.extend([
+            types.SimpleNamespace(name="Pads", children=[other], is_loadable=False),
+            types.SimpleNamespace(name="Leads", children=[duplicate], is_loadable=False),
+        ])
+        with self.assertRaises(Exception) as ambiguous:
+            self.bridge._resolve_user_item({"name": "Pad"})
+        self.assertIn("Multiple", str(ambiguous.exception))
+        self.assertEqual(ambiguous.exception.details["paths"], ["User Library/Control Deck/Pads/Pad", "User Library/Control Deck/Leads/Pad"])
+        chosen = self.bridge._resolve_user_item({"name": "Pad", "path": "User Library/Control Deck/Pads/Pad"})[0]
+        self.assertEqual(chosen["path"], "User Library/Control Deck/Pads/Pad")
+        with self.assertRaises(Exception) as disk:
+            self.bridge._resolve_user_item({"name": "Pad", "path": "/Users/remy/Library/Audio/Presets/Serum 2/Bass.vstpreset"})
+        self.assertIn(".vstpreset", str(disk.exception))
+        self.assertEqual(loaded, [item])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -144,6 +144,8 @@ class ControlDeckBridge(ControlSurface):
         if method == "plugins.refresh":
             self._refresh_plugins()
             return {"pluginCount": len(self._plugins or []), "cacheBuiltAt": self._cache_built_at}
+        if method == "devices.resolve_user_item":
+            return {"item": self._resolve_user_item(params)[0]}
         if method == "devices.load_user_item":
             return self._load_user_device(params)
         if method == "devices.resolve_browser_item":
@@ -840,6 +842,10 @@ class ControlDeckBridge(ControlSurface):
         }
 
     def _load_user_device(self, params):
+        loaded, item = self._resolve_user_item(params)
+        return self._load_item_on_track(item, params, loaded)
+
+    def _resolve_user_item(self, params):
         name = str(params.get("name", "")).strip()
         if not name:
             raise BridgeError("INVALID_DEVICE_NAME", "A User Library device name is required")
@@ -849,12 +855,30 @@ class ControlDeckBridge(ControlSurface):
             raise BridgeError("USER_LIBRARY_UNAVAILABLE", "Ableton's User Library is unavailable")
         matches = []
         self._find_user_items(root, ["User Library"], name.casefold(), matches, 0)
+        wanted = params.get("path")
+        if wanted is not None and str(wanted).strip():
+            wanted_text = str(wanted).strip()
+            self._reject_filesystem_preset_path(wanted_text)
+            normalized = wanted_text.casefold()
+            matches = [entry for entry in matches if entry[0].casefold() == normalized]
         if not matches:
             raise BridgeError("USER_DEVICE_NOT_FOUND", "User Library device '%s' was not found" % name)
         if len(matches) > 1:
-            raise BridgeError("USER_DEVICE_AMBIGUOUS", "Multiple User Library devices are named '%s'" % name, {"paths": [item[0] for item in matches[:20]]})
+            paths = [item[0] for item in matches[:20]]
+            raise BridgeError("USER_DEVICE_AMBIGUOUS", "Multiple User Library devices are named '%s': %s" % (name, ", ".join(paths)), {"paths": paths})
         path, item = matches[0]
-        return self._load_item_on_track(item, params, {"name": name, "path": path, "kind": "user-device"})
+        return {"name": name, "path": path, "kind": "user-device"}, item
+
+    def _reject_filesystem_preset_path(self, path):
+        # Browser.load_item only accepts a BrowserItem Live already lists.
+        # A disk path, including .vstpreset and .aupreset files, is not one.
+        if path.startswith("/") or path.startswith("~") or (len(path) > 2 and path[1] == ":"):
+            raise BridgeError(
+                "PRESET_PATH_UNSUPPORTED",
+                "path must be a Live Browser path such as 'User Library/Presets/Instruments/My Rack', not a file on disk. "
+                "Save the patch as an Instrument Rack (.adg) or a device preset (.adv) in the User Library and pass its exact name. "
+                "Live's API cannot load a .vstpreset or .aupreset from a filesystem path."
+            )
 
     def _browser_roots(self):
         browser = self.application().browser

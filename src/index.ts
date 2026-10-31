@@ -148,6 +148,9 @@ server.tool("find_live_device", "Resolve the exact Live Browser path for a nativ
 server.tool("load_live_device", "Load a native Live device (e.g. Drum Rack, Echo, Reverb) on an explicit track through Live's Browser, refusing ambiguous names and verifying the device chain.", {
   trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), name: z.string().min(1), path: z.string().optional(), dryRun: z.boolean().default(false)
 }, async input => response(await plugins.loadLiveDevice(input)));
+server.tool("load_user_library_item", "Load a User Library item, such as a saved Instrument Rack (.adg) or device preset (.adv), onto an exact track by exact name. Ambiguous names are refused. The device chain is read back. path is a Live Browser path, not a file on disk.", {
+  trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), name: z.string().min(1), path: z.string().min(1).optional(), dryRun: z.boolean().default(false)
+}, async input => response(await plugins.loadUserLibraryItem(input)));
 
 const shutdown = () => { samples.close(); ableton.close(); omnihostClient.close(); process.exit(0); };
 process.on("SIGINT", shutdown);
