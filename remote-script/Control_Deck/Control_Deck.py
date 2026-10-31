@@ -26,6 +26,9 @@ MAX_REQUEST_BYTES = 32768
 CHUNK_BYTES = 700
 MAX_QUEUE = 256
 MAX_RESPONSE_CACHE = 256
+# Live rejects arrangement clip times outside this range. See Track.create_midi_clip.
+MAX_ARRANGEMENT_BEATS = 1576800.0
+MAX_NOTES_PER_CALL = 256
 
 
 class ControlDeckBridge(ControlSurface):
@@ -141,6 +144,8 @@ class ControlDeckBridge(ControlSurface):
         if method == "plugins.refresh":
             self._refresh_plugins()
             return {"pluginCount": len(self._plugins or []), "cacheBuiltAt": self._cache_built_at}
+        if method == "devices.resolve_user_item":
+            return {"item": self._resolve_user_item(params)[0]}
         if method == "devices.load_user_item":
             return self._load_user_device(params)
         if method == "devices.resolve_browser_item":
@@ -188,7 +193,7 @@ class ControlDeckBridge(ControlSurface):
             track_index, track = self._track(args)
             values = [track_index]
             for clip in track.arrangement_clips:
-                values.extend([clip.name, clip.start_time, clip.end_time])
+                values.extend([clip.name, clip.start_time, clip.end_time, self._clip_kind(clip)])
         elif address == "/live/application/get/version":
             application = self.application()
             values = [application.get_major_version(), application.get_minor_version()]
@@ -258,6 +263,11 @@ class ControlDeckBridge(ControlSurface):
             values = [track_index, scene_index]
             for note in notes:
                 values.extend([note.pitch, note.start_time, note.duration, note.velocity, note.mute])
+        elif address == "/live/arrangement_clip/get/notes":
+            track_index, _track, clip_index, clip = self._arrangement_target(args)
+            self._require_midi_clip(clip, clip_index)
+            values = [track_index, clip_index, float(clip.start_time), float(clip.end_time), self._clip_kind(clip)]
+            values.extend(self._note_payload(self._clip_notes(clip)))
         elif address == "/live/view/get/selected_track":
             try:
                 index = list(song.tracks).index(song.view.selected_track)
@@ -346,6 +356,14 @@ class ControlDeckBridge(ControlSurface):
             while position < end - 0.0001:
                 track.duplicate_clip_to_arrangement(slot.clip, position)
                 position += step
+        elif address == "/live/track/create_arrangement_midi_clip":
+            self._create_arrangement_midi_clip(args)
+        elif address == "/live/arrangement_clip/add/notes":
+            self._add_arrangement_notes(args)
+        elif address == "/live/arrangement_clip/modify/notes":
+            self._modify_arrangement_notes(args)
+        elif address == "/live/arrangement_clip/remove/notes":
+            self._remove_arrangement_notes(args)
         elif address == "/live/track/clear_arrangement":
             self._require_args(args, 2, address)
             _track_index, track = self._track(args)
@@ -449,6 +467,270 @@ class ControlDeckBridge(ControlSurface):
         if parameter_index < 0:
             raise BridgeError("INVALID_PARAMETER", "Parameter index must be non-negative")
         return parameter_index, parameter
+
+    def _create_arrangement_midi_clip(self, args):
+        # Track.create_midi_clip(start_time, length) inserts an empty Arrangement
+        # MIDI clip. The second value is the length in beats, not the end time.
+        # Live 12.1.10 added the method; earlier versions do not have it.
+        self._require_args(args, 4, "/live/track/create_arrangement_midi_clip")
+        _track_index, track = self._named_track(args)
+        start = self._finite_float(args[2], "Arrangement clip start")
+        length = self._finite_float(args[3], "Arrangement clip length")
+        if start < 0 or start > MAX_ARRANGEMENT_BEATS or length <= 0 or start + length > MAX_ARRANGEMENT_BEATS:
+            raise BridgeError("INVALID_RANGE", "Arrangement clip start must be from 0 to %s beats and the clip must end inside that range" % MAX_ARRANGEMENT_BEATS)
+        name = None
+        if len(args) >= 5 and str(args[4]).strip():
+            name = str(args[4]).replace("\x00", "").replace("\r", " ").replace("\n", " ").strip()
+            if len(name) > 128:
+                raise BridgeError("INVALID_REQUEST", "Clip name exceeds 128 characters")
+        create = getattr(track, "create_midi_clip", None)
+        if not callable(create):
+            raise BridgeError("LIVE_VERSION_UNSUPPORTED", "Track.create_midi_clip is not available in this Live (%s). It needs Live 12.1.10 or newer." % self._live_version_text())
+        # Live 12.4 trims an overlapping Arrangement clip instead of raising.
+        # Refuse before create_midi_clip so an existing clip is never shortened.
+        end = start + length
+        overlaps = [clip for clip in track.arrangement_clips if self._arrangement_ranges_overlap(start, end, float(clip.start_time), float(clip.end_time))]
+        if overlaps:
+            raise BridgeError("CLIP_OVERLAP", self._overlap_message(start, end, overlaps))
+        try:
+            created = create(start, length)
+        except BridgeError:
+            raise
+        except Exception as error:
+            message = str(error)
+            if "overlap" in message.lower():
+                raise BridgeError("CLIP_OVERLAP", "An arrangement clip already occupies that time range on this track")
+            raise BridgeError("CLIP_NOT_CREATED", "Live did not create the arrangement MIDI clip (%s): %s" % (self._live_version_text(), message))
+        clip = created if self._looks_like_clip(created) else None
+        if clip is None:
+            matches = self._arrangement_clips_at(track, start, length)
+            if len(matches) != 1:
+                code = "CLIP_NOT_CONFIRMED" if len(matches) == 0 else "CLIP_AMBIGUOUS"
+                detail = "Live did not confirm the new arrangement MIDI clip" if len(matches) == 0 else "More than one arrangement clip matches that start and length"
+                raise BridgeError(code, detail)
+            clip = matches[0]
+        if name:
+            clip.name = name
+
+    def _named_track(self, args):
+        track_index, track = self._track(args)
+        expected = str(args[1])
+        if track.name != expected:
+            raise BridgeError("TRACK_IDENTITY_MISMATCH", "Expected track '%s', found '%s'" % (expected, track.name))
+        return track_index, track
+
+    def _live_version_text(self):
+        application = self.application()
+        try:
+            return "%s.%s.%s" % (application.get_major_version(), application.get_minor_version(), application.get_bugfix_version())
+        except Exception:
+            try:
+                return "%s.%s" % (application.get_major_version(), application.get_minor_version())
+            except Exception:
+                return "unknown"
+
+    def _finite_float(self, value, label):
+        try:
+            number = float(value)
+        except Exception:
+            raise BridgeError("INVALID_ARGUMENTS", "%s must be a number" % label)
+        if number != number or number in (float("inf"), float("-inf")):
+            raise BridgeError("INVALID_ARGUMENTS", "%s must be finite" % label)
+        return number
+
+    def _looks_like_clip(self, value):
+        if value is None or isinstance(value, (int, float, bool, str)):
+            return False
+        return hasattr(value, "start_time") and hasattr(value, "name")
+
+    def _arrangement_ranges_overlap(self, start, end, clip_start, clip_end):
+        # Half-open beat ranges. Clips that only touch at an endpoint do not overlap.
+        return start < clip_end - 1e-6 and end > clip_start + 1e-6
+
+    def _overlap_message(self, start, end, clips):
+        labels = [self._arrangement_clip_label(clip) for clip in clips[:5]]
+        extra = "" if len(clips) <= 5 else " and %d more" % (len(clips) - 5)
+        return "Refusing to create an arrangement MIDI clip from %s to %s beats because it overlaps %s%s. Existing clips were not changed." % (
+            self._beat_text(start), self._beat_text(end), ", ".join(labels), extra
+        )
+
+    def _arrangement_clip_label(self, clip):
+        span = "%s to %s beats" % (self._beat_text(clip.start_time), self._beat_text(clip.end_time))
+        name = str(getattr(clip, "name", "") or "").strip()
+        if name:
+            return "'%s' (%s)" % (name, span)
+        return span
+
+    def _beat_text(self, value):
+        number = float(value)
+        if abs(number - round(number)) < 0.001:
+            return str(int(round(number)))
+        return ("%.4f" % number).rstrip("0").rstrip(".")
+
+    def _arrangement_clips_at(self, track, start, length):
+        end = start + length
+        matches = []
+        for clip in track.arrangement_clips:
+            if abs(float(clip.start_time) - start) < 0.001 and abs(float(clip.end_time) - end) < 0.001:
+                matches.append(clip)
+        return matches
+
+    def _clip_kind(self, clip):
+        midi = self._clip_flag(clip, "is_midi_clip")
+        audio = self._clip_flag(clip, "is_audio_clip")
+        if midi and not audio:
+            return "midi"
+        if audio and not midi:
+            return "audio"
+        return "unknown"
+
+    def _clip_flag(self, clip, name):
+        try:
+            return bool(getattr(clip, name))
+        except Exception:
+            return False
+
+    def _arrangement_target(self, args):
+        self._require_args(args, 4, "arrangement clip operation")
+        track_index, track = self._named_track(args)
+        clip_index = self._non_negative_index(args[2], "Arrangement clip index")
+        expected_start = self._finite_float(args[3], "Arrangement clip start")
+        clips = list(track.arrangement_clips)
+        if clip_index >= len(clips):
+            raise BridgeError("CLIP_NOT_FOUND", "Arrangement clip index %d does not exist on track %d" % (clip_index, track_index))
+        clip = clips[clip_index]
+        actual_start = float(clip.start_time)
+        if abs(actual_start - expected_start) >= 0.001:
+            raise BridgeError("CLIP_IDENTITY_MISMATCH", "Arrangement clip %d on track '%s' starts at %s beats, not %s" % (clip_index, track.name, actual_start, expected_start))
+        return track_index, track, clip_index, clip
+
+    def _require_midi_clip(self, clip, clip_index):
+        kind = self._clip_kind(clip)
+        if kind != "midi":
+            raise BridgeError("CLIP_NOT_MIDI", "Arrangement clip %d is %s, not MIDI" % (clip_index, kind))
+
+    def _note_vector(self, clip):
+        # get_notes_extended returns std::vector<TNoteInfo>. apply_note_modifications
+        # requires that same vector object; a tuple or a copied list does not match.
+        span = 16384.0
+        try:
+            span = max(span, float(clip.length) + 1.0)
+        except Exception:
+            pass
+        return clip.get_notes_extended(0, 128, -8192.0, span)
+
+    def _clip_notes(self, clip):
+        return [note for note in self._note_vector(clip)]
+
+    def _note_payload(self, notes):
+        values = []
+        for note in notes:
+            values.extend([int(note.pitch), float(note.start_time), float(note.duration), float(note.velocity), bool(note.mute), int(note.note_id)])
+        return values
+
+    def _add_arrangement_notes(self, args):
+        _track_index, _track, clip_index, clip = self._arrangement_target(args)
+        self._require_midi_clip(clip, clip_index)
+        note_values = args[4:]
+        specs = self._note_specifications(note_values)
+        clip.add_new_notes(tuple(specs))
+
+    def _modify_arrangement_notes(self, args):
+        _track_index, _track, clip_index, clip = self._arrangement_target(args)
+        self._require_midi_clip(clip, clip_index)
+        mods = args[4:]
+        if not mods or len(mods) % 6 != 0:
+            raise BridgeError("INVALID_NOTES", "Note modifications must contain groups of id, pitch, start, duration, velocity, and mute")
+        if len(mods) // 6 > MAX_NOTES_PER_CALL:
+            raise BridgeError("INVALID_NOTES", "At most %d notes can be modified at once" % MAX_NOTES_PER_CALL)
+        vector = self._note_vector(clip)
+        by_id = {}
+        for note in vector:
+            note_id = int(note.note_id)
+            if note_id in by_id:
+                raise BridgeError("NOTE_ID_AMBIGUOUS", "Arrangement clip %d has more than one note with id %d" % (clip_index, note_id))
+            by_id[note_id] = note
+        seen = set()
+        for offset in range(0, len(mods), 6):
+            note_id = self._whole_number(mods[offset], "note id", 0, 2 ** 53)
+            if note_id in seen:
+                raise BridgeError("NOTE_ID_AMBIGUOUS", "Note id %d was given more than once" % note_id)
+            seen.add(note_id)
+            note = by_id.get(note_id)
+            if note is None:
+                raise BridgeError("NOTE_NOT_FOUND", "No note with id %d in arrangement clip %d" % (note_id, clip_index))
+            pitch, start_time, duration, velocity = self._validated_note(mods[offset + 1], mods[offset + 2], mods[offset + 3], mods[offset + 4], 0)
+            note.pitch = pitch
+            note.start_time = start_time
+            note.duration = duration
+            note.velocity = float(velocity)
+            note.mute = bool(mods[offset + 5])
+        # Session clips only call add_new_notes(tuple of MidiNoteSpecification), which Live accepts.
+        # apply_note_modifications does not: Live 12.4.16 rejected a tuple and requires this vector.
+        clip.apply_note_modifications(vector)
+
+    def _remove_arrangement_notes(self, args):
+        self._require_args(args, 8, "/live/arrangement_clip/remove/notes")
+        _track_index, _track, clip_index, clip = self._arrangement_target(args)
+        self._require_midi_clip(clip, clip_index)
+        from_pitch = self._whole_number(args[4], "fromPitch", 0, 127)
+        pitch_span = self._whole_number(args[5], "pitchSpan", 1, 128)
+        if from_pitch + pitch_span > 128:
+            raise BridgeError("INVALID_RANGE", "Pitch range must stay inside 0-127")
+        from_time = self._finite_float(args[6], "fromTime")
+        time_span = self._finite_float(args[7], "timeSpan")
+        if from_time < 0 or time_span <= 0:
+            raise BridgeError("INVALID_RANGE", "fromTime must be >= 0 and timeSpan must be positive")
+        matched = [note for note in self._clip_notes(clip) if self._note_starts_in_range(note, from_pitch, pitch_span, from_time, time_span)]
+        if not matched:
+            raise BridgeError("NOTE_NOT_FOUND", "No notes start in that pitch and time range on arrangement clip %d" % clip_index)
+        clip.remove_notes_extended(from_pitch, pitch_span, from_time, time_span)
+
+    def _note_specifications(self, note_values):
+        if not note_values or len(note_values) % 5 != 0:
+            raise BridgeError("INVALID_NOTES", "MIDI note data must contain groups of five values")
+        if len(note_values) // 5 > MAX_NOTES_PER_CALL:
+            raise BridgeError("INVALID_NOTES", "At most %d notes can be written at once" % MAX_NOTES_PER_CALL)
+        specs = []
+        for offset in range(0, len(note_values), 5):
+            pitch, start_time, duration, velocity = self._validated_note(note_values[offset], note_values[offset + 1], note_values[offset + 2], note_values[offset + 3], 1)
+            specs.append(Live.Clip.MidiNoteSpecification(
+                pitch=pitch, start_time=start_time, duration=duration, velocity=velocity, mute=bool(note_values[offset + 4])
+            ))
+        return specs
+
+    def _validated_note(self, pitch, start_time, duration, velocity, minimum_velocity):
+        pitch_number = self._whole_number(pitch, "pitch", 0, 127)
+        start_number = self._finite_float(start_time, "note start")
+        duration_number = self._finite_float(duration, "note duration")
+        if start_number < 0 or duration_number <= 0:
+            raise BridgeError("INVALID_NOTES", "Note start must be >= 0 and duration must be positive")
+        velocity_number = self._whole_number(velocity, "velocity", minimum_velocity, 127)
+        return pitch_number, start_number, duration_number, velocity_number
+
+    def _non_negative_index(self, value, label):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise BridgeError("INVALID_ARGUMENTS", "%s must be an integer" % label)
+        number = float(value)
+        if number != number or not number.is_integer() or number < 0:
+            raise BridgeError("INVALID_ARGUMENTS", "%s must be a non-negative integer" % label)
+        return int(number)
+
+    def _whole_number(self, value, label, low, high):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise BridgeError("INVALID_NOTES", "%s must be a number" % label)
+        number = float(value)
+        if number != number or not number.is_integer():
+            raise BridgeError("INVALID_NOTES", "%s must be an integer" % label)
+        whole = int(number)
+        if whole < low or whole > high:
+            raise BridgeError("INVALID_NOTES", "%s must be from %d to %d" % (label, low, high))
+        return whole
+
+    def _note_starts_in_range(self, note, from_pitch, pitch_span, from_time, time_span):
+        pitch = int(note.pitch)
+        start = float(note.start_time)
+        return from_pitch <= pitch < from_pitch + pitch_span and from_time <= start < from_time + time_span
 
     def _json_value(self, value):
         if value is None or isinstance(value, (str, int, float, bool)):
@@ -596,6 +878,10 @@ class ControlDeckBridge(ControlSurface):
         }
 
     def _load_user_device(self, params):
+        loaded, item = self._resolve_user_item(params)
+        return self._load_item_on_track(item, params, loaded)
+
+    def _resolve_user_item(self, params):
         name = str(params.get("name", "")).strip()
         if not name:
             raise BridgeError("INVALID_DEVICE_NAME", "A User Library device name is required")
@@ -605,12 +891,30 @@ class ControlDeckBridge(ControlSurface):
             raise BridgeError("USER_LIBRARY_UNAVAILABLE", "Ableton's User Library is unavailable")
         matches = []
         self._find_user_items(root, ["User Library"], name.casefold(), matches, 0)
+        wanted = params.get("path")
+        if wanted is not None and str(wanted).strip():
+            wanted_text = str(wanted).strip()
+            self._reject_filesystem_preset_path(wanted_text)
+            normalized = wanted_text.casefold()
+            matches = [entry for entry in matches if entry[0].casefold() == normalized]
         if not matches:
             raise BridgeError("USER_DEVICE_NOT_FOUND", "User Library device '%s' was not found" % name)
         if len(matches) > 1:
-            raise BridgeError("USER_DEVICE_AMBIGUOUS", "Multiple User Library devices are named '%s'" % name, {"paths": [item[0] for item in matches[:20]]})
+            paths = [item[0] for item in matches[:20]]
+            raise BridgeError("USER_DEVICE_AMBIGUOUS", "Multiple User Library devices are named '%s': %s" % (name, ", ".join(paths)), {"paths": paths})
         path, item = matches[0]
-        return self._load_item_on_track(item, params, {"name": name, "path": path, "kind": "user-device"})
+        return {"name": name, "path": path, "kind": "user-device"}, item
+
+    def _reject_filesystem_preset_path(self, path):
+        # Browser.load_item only accepts a BrowserItem Live already lists.
+        # A disk path, including .vstpreset and .aupreset files, is not one.
+        if path.startswith("/") or path.startswith("~") or (len(path) > 2 and path[1] == ":"):
+            raise BridgeError(
+                "PRESET_PATH_UNSUPPORTED",
+                "path must be a Live Browser path such as 'User Library/Presets/Instruments/My Rack', not a file on disk. "
+                "Save the patch as an Instrument Rack (.adg) or a device preset (.adv) in the User Library and pass its exact name. "
+                "Live's API cannot load a .vstpreset or .aupreset from a filesystem path."
+            )
 
     def _browser_roots(self):
         browser = self.application().browser

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { parseBridgeDatagram, BRIDGE_PROTOCOL } from "../src/ableton-client.js";
+import { AbletonBridgeError, parseBridgeDatagram, BRIDGE_PROTOCOL } from "../src/ableton-client.js";
 import { PluginTools } from "../src/plugin-tools.js";
 
 const logger = { write: vi.fn() };
@@ -50,6 +50,38 @@ describe("plugin tools", () => {
     expect(result).toMatchObject({ ok: true, data: { deviceCountBefore: 0, deviceCountAfter: 1, newDevices: [{ name: "Pro-Q 4" }] } });
     expect(bridge.resolvePlugin).toHaveBeenCalledTimes(1);
     expect(bridge.loadPlugin).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads a User Library rack by exact name and reads the device chain back", async () => {
+    let loaded = false;
+    const bridge = {
+      resolveUserLibraryItem: vi.fn(async () => ({ item: { name: "Serum Rack", path: "User Library/Presets/Instruments/Serum Rack", kind: "user-device" } })),
+      loadUserDevice: vi.fn(async () => { loaded = true; return { loaded: { name: "Serum Rack" } }; })
+    };
+    const osc = { query: vi.fn(async (address: string) => {
+      if (address.endsWith("track_names")) return { args: ["Bass"] };
+      if (address.endsWith("selected_track")) return { args: [0] };
+      if (address.endsWith("devices/name")) return { args: loaded ? [0, "Serum Rack"] : [0] };
+      if (address.endsWith("devices/class_name")) return { args: loaded ? [0, "InstrumentGroupDevice"] : [0] };
+      throw new Error(address);
+    }) };
+    const result = await new PluginTools(bridge as never, osc as never, logger as never).loadUserLibraryItem({ trackIndex: 0, expectedTrackName: "Bass", name: "Serum Rack" });
+    expect(result).toMatchObject({ ok: true, data: { deviceCountBefore: 0, deviceCountAfter: 1, devicesAfter: [{ name: "Serum Rack", className: "InstrumentGroupDevice" }], resolved: { path: "User Library/Presets/Instruments/Serum Rack" } } });
+    expect(bridge.loadUserDevice).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses an ambiguous User Library name and a filesystem preset path", async () => {
+    const bridge = {
+      resolveUserLibraryItem: vi.fn(async () => { throw new AbletonBridgeError("USER_DEVICE_AMBIGUOUS", "Multiple User Library devices are named 'Pad'", { paths: ["User Library/Pads/Pad", "User Library/Leads/Pad"] }); }),
+      loadUserDevice: vi.fn()
+    };
+    const osc = { query: vi.fn(async (address: string) => address.endsWith("track_names") ? { args: ["Bass"] } : { args: [] }) };
+    const tools = new PluginTools(bridge as never, osc as never, logger as never);
+    const ambiguous = await tools.loadUserLibraryItem({ trackIndex: 0, expectedTrackName: "Bass", name: "Pad" });
+    expect(ambiguous).toMatchObject({ ok: false, error: { code: "USER_DEVICE_AMBIGUOUS", details: { paths: ["User Library/Pads/Pad", "User Library/Leads/Pad"] } } });
+    expect(bridge.loadUserDevice).not.toHaveBeenCalled();
+    await expect(tools.loadUserLibraryItem({ trackIndex: 0, expectedTrackName: "Bass", name: "Bass", path: "/Users/remy/Library/Audio/Presets/Serum 2/Bass.vstpreset" })).rejects.toThrow(/not a file on disk/);
+    expect(bridge.resolveUserLibraryItem).toHaveBeenCalledTimes(1);
   });
 
   it("rejects a shifted or renamed target before calling Control Deck", async () => {

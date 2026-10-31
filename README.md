@@ -42,7 +42,9 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 - Control a fully indexed VST3 instrument through OmniHost, past Live's parameter ceiling
 - Search a local sample index by keyword, folder, BPM, key, duration, and tags
 - List, add, rename, and delete Arrangement locators; adding or deleting one needs playback stopped and puts the playhead back afterwards
-- List a track's Arrangement clips, tile a Session clip into the Arrangement over a beat range, and clear a track's Arrangement (confirmation required)
+- List a track's Arrangement clips with start, end, name, and MIDI or audio type; tile a Session clip into the Arrangement over a beat range; and clear a track's Arrangement (confirmation required)
+- Create an empty Arrangement MIDI clip on Live 12.1.10 or newer, then read, add, change, or remove its notes. Every write is read back.
+- Load a User Library item, such as a saved Instrument Rack holding Pigments or Serum 2, by exact name. A preset file path on disk is refused.
 
 ## Requirements
 

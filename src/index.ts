@@ -91,7 +91,26 @@ server.tool("stop_recording", "Disable Arrangement recording and verify it.", { 
 server.tool("list_locators", "List Arrangement locators (cue points) with their positions in beats.", {}, async () => response(await live.listLocators()));
 server.tool("add_locator", "Create (or rename) an Arrangement locator at an exact beat position and verify its name. Playback must be stopped; the playhead is returned to where it was.", { timeBeats: z.number().min(0), name: z.string().min(1), dryRun: z.boolean().default(false) }, async ({ timeBeats, name, dryRun }) => response(await live.addLocator(timeBeats, name, dryRun)));
 server.tool("delete_locator", "Delete the Arrangement locator at an exact beat position. Playback must be stopped; the playhead is returned to where it was.", { timeBeats: z.number().min(0), dryRun: z.boolean().default(false) }, async ({ timeBeats, dryRun }) => response(await live.deleteLocator(timeBeats, dryRun)));
-server.tool("list_arrangement_clips", "List Arrangement View clips on a track with start/end in beats.", { trackIndex: z.number().int().min(0) }, async ({ trackIndex }) => response(await live.listArrangementClips(trackIndex)));
+server.tool("list_arrangement_clips", "List Arrangement View clips on a track with index, name, start, end, length, and MIDI or audio type.", { trackIndex: z.number().int().min(0) }, async ({ trackIndex }) => response(await live.listArrangementClips(trackIndex)));
+server.tool("create_arrangement_midi_clip", "Create an empty Arrangement MIDI clip with Track.create_midi_clip(start_time, length). Needs Live 12.1.10 or newer. Requires the track index and current name, then reads the clip back.", {
+  trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), startBeats: z.number().min(0), lengthBeats: z.number().positive(), name: z.string().min(1).max(128).optional(), dryRun: z.boolean().default(false)
+}, async input => response(await live.createArrangementMidiClip(input)));
+const arrangementClipTarget = { trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), clipIndex: z.number().int().min(0).optional(), startBeats: z.number().min(0).optional() };
+server.tool("get_arrangement_clip_notes", "Read notes in one Arrangement MIDI clip, addressed by track plus clip index or start time. Note times are beats from the start of the clip.", arrangementClipTarget, async input => response(await live.getArrangementClipNotes(input)));
+server.tool("add_arrangement_clip_notes", "Add MIDI notes to an Arrangement MIDI clip and read them back. A requested note that is missing or different fails the call. Note times are beats from the start of the clip.", {
+  ...arrangementClipTarget,
+  notes: z.array(z.object({ pitch: z.union([z.number().int(), z.string()]), startTime: z.number(), duration: z.number(), velocity: z.number().int(), mute: z.boolean().default(false) })).min(1),
+  dryRun: z.boolean().default(false)
+}, async input => response(await live.addArrangementClipNotes(input)));
+server.tool("modify_arrangement_clip_notes", "Change existing Arrangement MIDI notes by note id from get_arrangement_clip_notes, then read them back. Unspecified fields stay as they are.", {
+  ...arrangementClipTarget,
+  notes: z.array(z.object({ noteId: z.number().int().min(0), pitch: z.union([z.number().int(), z.string()]).optional(), startTime: z.number().min(0).optional(), duration: z.number().positive().optional(), velocity: z.number().int().min(1).max(127).optional(), mute: z.boolean().optional() })).min(1),
+  dryRun: z.boolean().default(false)
+}, async input => response(await live.modifyArrangementClipNotes(input)));
+server.tool("remove_arrangement_clip_notes", "Remove Arrangement MIDI notes whose start lies in a pitch and time range, using Clip.remove_notes_extended, then read the clip back. Times are beats from the start of the clip. The end of the time range is exclusive.", {
+  ...arrangementClipTarget,
+  fromPitch: z.number().int().min(0).max(127), pitchSpan: z.number().int().min(1).max(128), fromTime: z.number().min(0), timeSpan: z.number().positive(), dryRun: z.boolean().default(false)
+}, async input => response(await live.removeArrangementClipNotes(input)));
 server.tool("place_clip_in_arrangement", "Copy a Session View clip (MIDI or audio) into the Arrangement, tiled back-to-back from startBeats until endBeats, and verify. Each copy is the full clip, so the last one can run past endBeats. At most 512 copies.", {
   trackIndex: z.number().int().min(0), sceneIndex: z.number().int().min(0), startBeats: z.number().min(0), endBeats: z.number().positive(), dryRun: z.boolean().default(false)
 }, async input => response(await live.placeClipInArrangement(input)));
@@ -129,6 +148,9 @@ server.tool("find_live_device", "Resolve the exact Live Browser path for a nativ
 server.tool("load_live_device", "Load a native Live device (e.g. Drum Rack, Echo, Reverb) on an explicit track through Live's Browser, refusing ambiguous names and verifying the device chain.", {
   trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), name: z.string().min(1), path: z.string().optional(), dryRun: z.boolean().default(false)
 }, async input => response(await plugins.loadLiveDevice(input)));
+server.tool("load_user_library_item", "Load a User Library item, such as a saved Instrument Rack (.adg) or device preset (.adv), onto an exact track by exact name. Ambiguous names are refused. The device chain is read back. path is a Live Browser path, not a file on disk.", {
+  trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), name: z.string().min(1), path: z.string().min(1).optional(), dryRun: z.boolean().default(false)
+}, async input => response(await plugins.loadUserLibraryItem(input)));
 
 const shutdown = () => { samples.close(); ableton.close(); omnihostClient.close(); process.exit(0); };
 process.on("SIGINT", shutdown);

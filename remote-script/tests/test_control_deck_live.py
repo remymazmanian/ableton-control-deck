@@ -46,6 +46,69 @@ class Parameter(object):
         return "%.2f" % value
 
 
+class ArrangementNote(object):
+    def __init__(self, pitch, start, duration, velocity, mute, note_id):
+        self.pitch = pitch
+        self.start_time = start
+        self.duration = duration
+        self.velocity = float(velocity)
+        self.mute = mute
+        self.note_id = note_id
+
+
+class NoteVector(list):
+    """Stand-in for the std::vector<TNoteInfo> get_notes_extended returns."""
+
+
+class ArrangementClip(object):
+    def __init__(self, name, start, end, midi=True):
+        self.name = name
+        self.start_time = float(start)
+        self.end_time = float(end)
+        self.length = self.end_time - self.start_time
+        self.is_midi_clip = midi
+        self.is_audio_clip = not midi
+        self._notes = []
+        self._next_id = 1
+        self.last_vector = None
+        self.last_applied = None
+
+    def add_new_notes(self, specs):
+        for spec in specs:
+            self._notes.append(ArrangementNote(spec.pitch, spec.start_time, spec.duration, spec.velocity, spec.mute, self._next_id))
+            self._next_id += 1
+
+    def get_notes_extended(self, from_pitch, pitch_span, from_time, time_span):
+        vector = NoteVector(
+            note for note in self._notes
+            if from_pitch <= int(note.pitch) < from_pitch + pitch_span and from_time <= float(note.start_time) < from_time + time_span
+        )
+        self.last_vector = vector
+        return vector
+
+    def apply_note_modifications(self, notes):
+        # Live 12.4.16: a tuple does not match std::vector<NClipApi::TNoteInfo>.
+        if isinstance(notes, tuple):
+            raise TypeError(
+                "Python argument types in Clip.apply_note_modifications(Clip, tuple) "
+                "did not match C++ signature: "
+                "apply_note_modifications(TPyHandle<AClip>, std::vector<NClipApi::TNoteInfo>)"
+            )
+        if notes is not self.last_vector:
+            raise TypeError("apply_note_modifications requires the vector object returned by get_notes_extended")
+        self.last_applied = notes
+        known = set(note.note_id for note in self._notes)
+        for note in notes:
+            if note.note_id not in known:
+                raise RuntimeError("unknown note")
+
+    def remove_notes_extended(self, from_pitch, pitch_span, from_time, time_span):
+        self._notes = [
+            note for note in self._notes
+            if not (from_pitch <= int(note.pitch) < from_pitch + pitch_span and from_time <= float(note.start_time) < from_time + time_span)
+        ]
+
+
 class Clip(object):
     def __init__(self):
         self.name = "Chord"
@@ -92,6 +155,30 @@ class Track(object):
         self.mixer_device = types.SimpleNamespace(volume=Parameter("Volume", 0.85), panning=Parameter("Pan", 0.0, -1.0, 1.0))
         self.clip_slots = [Slot()]
         self.devices = [Device()]
+        self.arrangement_clips = []
+
+    def create_midi_clip(self, start, length):
+        # Live 12.4.16 does not raise on overlap. It trims the existing clip, then inserts.
+        start = float(start)
+        length = float(length)
+        end = start + length
+        for clip in list(self.arrangement_clips):
+            clip_start = float(clip.start_time)
+            clip_end = float(clip.end_time)
+            if not (start < clip_end and end > clip_start):
+                continue
+            if clip_start < start < clip_end:
+                clip.end_time = start
+                clip.length = start - clip_start
+            elif clip_start < end < clip_end:
+                clip.start_time = end
+                clip.length = clip_end - end
+            else:
+                self.arrangement_clips.remove(clip)
+        created = ArrangementClip("", start, end, True)
+        self.arrangement_clips.append(created)
+        self.arrangement_clips.sort(key=lambda clip: float(clip.start_time))
+        return created
 
 
 class Song(object):
@@ -141,6 +228,105 @@ class ControlDeckLiveTests(unittest.TestCase):
         self.assertEqual(len(self.song.tracks), 2)
         with self.assertRaises(Exception):
             self.bridge._live_command({"address": "/live/song/save_as", "args": ["unsafe.als"]})
+
+    def test_creates_an_arrangement_midi_clip_and_names_it(self):
+        self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 8.0, 4.0, "Hook"]})
+        clip = self.song.tracks[0].arrangement_clips[0]
+        self.assertEqual((clip.name, clip.start_time, clip.end_time), ("Hook", 8.0, 12.0))
+        listed = self.bridge._live_query({"address": "/live/track/get/arrangement_clips", "args": [0]})
+        self.assertEqual(listed["args"], [0, "Hook", 8.0, 12.0, "midi"])
+
+    def test_create_arrangement_midi_clip_refuses_the_wrong_track_and_overlap(self):
+        with self.assertRaises(Exception) as mismatch:
+            self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Bass", 0.0, 4.0]})
+        self.assertIn("Bass", str(mismatch.exception))
+        self.assertEqual(self.song.tracks[0].arrangement_clips, [])
+        self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 8.0, 4.0, "Hook"]})
+        with self.assertRaises(Exception) as overlap:
+            self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 10.0, 4.0, "Next"]})
+        self.assertIn("Hook", str(overlap.exception))
+        self.assertIn("8 to 12", str(overlap.exception))
+        clips = self.song.tracks[0].arrangement_clips
+        self.assertEqual(len(clips), 1)
+        self.assertEqual((clips[0].name, clips[0].start_time, clips[0].end_time), ("Hook", 8.0, 12.0))
+
+    def test_adjacent_arrangement_clips_are_not_an_overlap(self):
+        self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 8.0, 4.0, "Hook"]})
+        self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 12.0, 4.0, "Next"]})
+        clips = [(clip.name, clip.start_time, clip.end_time) for clip in self.song.tracks[0].arrangement_clips]
+        self.assertEqual(clips, [("Hook", 8.0, 12.0), ("Next", 12.0, 16.0)])
+
+    def test_names_the_new_clip_when_create_midi_clip_returns_a_zero_id(self):
+        # Live 12.1.10 created the clip but returned id 0. Naming must follow the clip, not that id.
+        track = self.song.tracks[0]
+        original = track.create_midi_clip
+
+        def create(start, length):
+            original(start, length)
+            return 0
+
+        track.create_midi_clip = create
+        self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 16.0, 4.0, "Drop"]})
+        self.assertEqual(track.arrangement_clips[0].name, "Drop")
+        self.assertEqual(track.arrangement_clips[0].end_time, 20.0)
+
+    def test_create_arrangement_midi_clip_reports_a_missing_live_method(self):
+        self.song.tracks[0].create_midi_clip = None
+        with self.assertRaises(Exception) as raised:
+            self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 0.0, 4.0]})
+        self.assertIn("12.1.10", str(raised.exception))
+        self.assertIn("12.4", str(raised.exception))
+
+    def test_adds_reads_modifies_and_removes_arrangement_notes(self):
+        self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 0.0, 8.0, "Lead"]})
+        self.bridge._live_command({"address": "/live/arrangement_clip/add/notes", "args": [0, "Synth", 0, 0.0, 60, 0.0, 1.0, 100, False, 64, 1.0, 0.5, 90, True]})
+        listed = self.bridge._live_query({"address": "/live/arrangement_clip/get/notes", "args": [0, "Synth", 0, 0.0]})
+        self.assertEqual(listed["args"][:5], [0, 0, 0.0, 8.0, "midi"])
+        self.assertEqual(listed["args"][5:11], [60, 0.0, 1.0, 100.0, False, 1])
+        self.bridge._live_command({"address": "/live/arrangement_clip/modify/notes", "args": [0, "Synth", 0, 0.0, 1, 67, 0.0, 1.0, 100, False]})
+        clip = self.song.tracks[0].arrangement_clips[0]
+        self.assertIs(clip.last_applied, clip.last_vector)
+        self.assertIsInstance(clip.last_applied, NoteVector)
+        self.assertNotIsInstance(clip.last_applied, tuple)
+        modified = self.bridge._live_query({"address": "/live/arrangement_clip/get/notes", "args": [0, "Synth", 0, 0.0]})
+        self.assertEqual(modified["args"][5], 67)
+        self.bridge._live_command({"address": "/live/arrangement_clip/remove/notes", "args": [0, "Synth", 0, 0.0, 64, 1, 1.0, 0.5]})
+        remaining = self.bridge._live_query({"address": "/live/arrangement_clip/get/notes", "args": [0, "Synth", 0, 0.0]})
+        self.assertEqual(len(remaining["args"]), 11)
+        self.assertEqual(remaining["args"][5], 67)
+
+    def test_arrangement_note_writes_refuse_a_fractional_clip_index(self):
+        self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 0.0, 4.0]})
+        with self.assertRaises(Exception) as raised:
+            self.bridge._live_query({"address": "/live/arrangement_clip/get/notes", "args": [0, "Synth", 1.5, 0.0]})
+        self.assertIn("non-negative integer", str(raised.exception))
+
+    def test_arrangement_note_writes_refuse_the_wrong_clip_or_an_audio_clip(self):
+        self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 0.0, 4.0]})
+        with self.assertRaises(Exception) as mismatch:
+            self.bridge._live_command({"address": "/live/arrangement_clip/add/notes", "args": [0, "Synth", 0, 3.0, 60, 0.0, 1.0, 100, False]})
+        self.assertIn("starts at", str(mismatch.exception))
+        self.assertEqual(self.song.tracks[0].arrangement_clips[0]._notes, [])
+        self.song.tracks[0].arrangement_clips = [ArrangementClip("Room", 0.0, 4.0, False)]
+        with self.assertRaises(Exception) as audio:
+            self.bridge._live_query({"address": "/live/arrangement_clip/get/notes", "args": [0, "Synth", 0, 0.0]})
+        self.assertIn("not MIDI", str(audio.exception))
+
+    def test_remove_arrangement_notes_refuses_an_empty_range(self):
+        self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 0.0, 4.0]})
+        self.bridge._live_command({"address": "/live/arrangement_clip/add/notes", "args": [0, "Synth", 0, 0.0, 60, 0.0, 1.0, 100, False]})
+        with self.assertRaises(Exception) as empty:
+            self.bridge._live_command({"address": "/live/arrangement_clip/remove/notes", "args": [0, "Synth", 0, 0.0, 61, 1, 0.0, 1.0]})
+        self.assertIn("No notes", str(empty.exception))
+        self.assertEqual(len(self.song.tracks[0].arrangement_clips[0]._notes), 1)
+
+    def test_lists_arrangement_clips_with_midi_or_audio_kind(self):
+        self.song.tracks[0].arrangement_clips = [
+            types.SimpleNamespace(name="Beat", start_time=0.0, end_time=4.0, is_midi_clip=True, is_audio_clip=False),
+            types.SimpleNamespace(name="Room", start_time=4.0, end_time=8.0, is_midi_clip=False, is_audio_clip=True),
+        ]
+        listed = self.bridge._live_query({"address": "/live/track/get/arrangement_clips", "args": [0]})
+        self.assertEqual(listed["args"], [0, "Beat", 0.0, 4.0, "midi", "Room", 4.0, 8.0, "audio"])
 
     def test_creates_clip_and_validated_note_objects(self):
         self.bridge._live_command({"address": "/live/clip_slot/create_clip", "args": [0, 0, 4.0]})
@@ -227,6 +413,23 @@ class ControlDeckLiveTests(unittest.TestCase):
         result = self.bridge._load_user_device({"name": "Control Deck OmniHost", "trackIndex": 0, "expectedTrackName": "Synth"})
         self.assertEqual(loaded, [item])
         self.assertEqual(result["loaded"]["path"], "User Library/Control Deck/Control Deck OmniHost")
+
+        other = types.SimpleNamespace(name="Pad", children=[], is_loadable=True)
+        duplicate = types.SimpleNamespace(name="Pad", children=[], is_loadable=True)
+        folder.children.extend([
+            types.SimpleNamespace(name="Pads", children=[other], is_loadable=False),
+            types.SimpleNamespace(name="Leads", children=[duplicate], is_loadable=False),
+        ])
+        with self.assertRaises(Exception) as ambiguous:
+            self.bridge._resolve_user_item({"name": "Pad"})
+        self.assertIn("Multiple", str(ambiguous.exception))
+        self.assertEqual(ambiguous.exception.details["paths"], ["User Library/Control Deck/Pads/Pad", "User Library/Control Deck/Leads/Pad"])
+        chosen = self.bridge._resolve_user_item({"name": "Pad", "path": "User Library/Control Deck/Pads/Pad"})[0]
+        self.assertEqual(chosen["path"], "User Library/Control Deck/Pads/Pad")
+        with self.assertRaises(Exception) as disk:
+            self.bridge._resolve_user_item({"name": "Pad", "path": "/Users/remy/Library/Audio/Presets/Serum 2/Bass.vstpreset"})
+        self.assertIn(".vstpreset", str(disk.exception))
+        self.assertEqual(loaded, [item])
 
 
 if __name__ == "__main__":

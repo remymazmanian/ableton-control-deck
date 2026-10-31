@@ -4,6 +4,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- `create_arrangement_midi_clip` creates an empty MIDI clip in the Arrangement with `Track.create_midi_clip(start_time, length)` on Live 12.1.10 or newer. It checks the track index and current name, then reads the clip back. Older Live versions fail with a message that names the running version.
+- `get_arrangement_clip_notes`, `add_arrangement_clip_notes`, `modify_arrangement_clip_notes`, and `remove_arrangement_clip_notes` read and edit notes on an Arrangement MIDI clip. The clip is addressed by track plus clip index or start time. Every write reads the notes back.
+- `load_user_library_item` loads a User Library item, such as a saved Instrument Rack (`.adg`) or device preset (`.adv`), onto an exact track by exact name. Ambiguous names are refused. The device chain is read back. A filesystem path, including `.vstpreset` and `.aupreset`, is refused.
+
+### Fixed
+
+- `modify_arrangement_clip_notes` passes the note vector from `get_notes_extended` to `Clip.apply_note_modifications`. Live 12.4.16 rejects a tuple.
+- `create_arrangement_midi_clip` refuses an overlapping range before calling Live, and names the clip already there. Live 12.4 trims the existing clip instead of raising, so the bridge must not create in that case.
+
+### Changed
+
+- `list_arrangement_clips` now includes each clip's index, length, and whether it is MIDI or audio.
+- Documented limits stay in place for what the API still cannot do: arrangement automation, saving the Live Set, and rendering. Arrangement MIDI clip creation is available on Live 12.1.10 and newer.
+
+Arrangement clip creation, note add/remove, and a unique User Library `.adv` load were checked in Live 12.4.16. Frozen tracks, recording into a track, audio-clip note refusal, a duplicate User Library name, and a Pigments or Serum 2 rack still need a check.
+
 ## [1.1.0] - 2026-10-11
 
 Adds Arrangement tools: locators and clips. Tested with Ableton Live 12.4.6. After updating, restart Live so it loads the new remote script.
