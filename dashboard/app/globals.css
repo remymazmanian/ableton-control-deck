@@ -248,6 +248,18 @@ h1 { margin-bottom: 12px; max-width: 740px; font-size: clamp(31px, 4vw, 58px); l
 .save-actions button { border: 1px solid var(--signal); background: var(--signal); color: #10140b; }
 
 footer { display: flex; justify-content: space-between; margin-top: 13px; color: #424d52; font: 600 8px/1 var(--font-geist-mono), monospace; letter-spacing: .15em; }
+.deck-credit {
+  display: block;
+  width: min(1540px, 100%);
+  margin: 18px auto 0;
+  padding: 0 30px 22px;
+  color: var(--dim);
+  font: 500 10px/1.5 var(--font-geist-mono), monospace;
+  letter-spacing: .02em;
+}
+.deck-credit p { margin: 0; }
+.deck-credit a { color: var(--muted); text-decoration: none; }
+.deck-credit a:hover { color: var(--ink); }
 
 .guide-body { display: flex; flex-direction: column; gap: 14px; padding: 18px 22px 22px; }
 .guide-text { margin: 0; color: #8b969c; font-size: 12px; line-height: 1.65; max-width: 640px; }
@@ -276,6 +288,7 @@ footer { display: flex; justify-content: space-between; margin-top: 13px; color:
 
 @media (max-width: 720px) {
   .deck-shell { padding: 16px 14px 22px; }
+  .deck-credit { padding: 0 14px 18px; }
   .topbar { align-items: flex-start; }
   .topbar-actions { align-items: flex-end; flex-direction: column-reverse; gap: 7px; }
   .local-pill { padding: 7px 9px; font-size: 8px; }
