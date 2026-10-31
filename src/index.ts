@@ -35,6 +35,7 @@ server.tool("add_midi_notes", "Validate and add MIDI notes to a Session View cli
   notes: z.array(z.object({ pitch: z.union([z.number().int(), z.string()]), startTime: z.number(), duration: z.number(), velocity: z.number().int(), mute: z.boolean().default(false) })).min(1),
   dryRun: z.boolean().default(false)
 }, async ({ trackIndex, sceneIndex, notes, dryRun }) => response(await commands.addMidiNotes(trackIndex, sceneIndex, notes, dryRun)));
+server.tool("get_clip_notes", "Read every MIDI note in a Session View clip (pitch, startTime and duration in beats, velocity, mute), sorted by start time then pitch, plus the clip length.", { trackIndex: z.number().int().min(0), sceneIndex: z.number().int().min(0) }, async ({ trackIndex, sceneIndex }) => response(await live.getClipNotes(trackIndex, sceneIndex)));
 server.tool("delete_track", "Delete a track by explicit index. confirm=true is mandatory except in dry-run mode.", { trackIndex: z.number().int().min(0), confirm: z.boolean().default(false), dryRun: z.boolean().default(false) }, async ({ trackIndex, confirm, dryRun }) => response(await commands.deleteTrack(trackIndex, confirm, dryRun)));
 
 server.tool("get_live_set", "Return a structured overview of the Live version, transport, signature, tracks, scenes, and selection.", {}, async () => response(await live.getLiveSet()));
