@@ -1,4 +1,4 @@
-import { parseArrangementClips, type ArrangementClipDescriptor } from "./arrangement-clips.js";
+import { findCreatedMidiClip, MAX_ARRANGEMENT_BEATS, parseArrangementClips, type ArrangementClipDescriptor } from "./arrangement-clips.js";
 import { JsonLogger } from "./logger.js";
 import { oscFloat, oscInt, type LiveControlClient, type OscArgument, type ToolResult } from "./types.js";
 import { trackIndexSchema } from "./validation.js";
@@ -372,6 +372,23 @@ export class LiveTools {
     return this.read("list_arrangement_clips", async () => ({ trackIndex, trackName: await this.assertTrack(trackIndex), clips: await this.arrangementClips(trackIndex) }));
   }
 
+  async createArrangementMidiClip(input: { trackIndex: number; expectedTrackName: string; startBeats: number; lengthBeats: number; name?: string; dryRun?: boolean }): Promise<ToolResult> {
+    const { trackIndex, expectedTrackName, startBeats, lengthBeats, name, dryRun = false } = input;
+    trackIndexSchema.parse(trackIndex);
+    if (!expectedTrackName.trim()) throw new Error("Expected track name must not be empty.");
+    if (!Number.isFinite(startBeats) || startBeats < 0 || startBeats > MAX_ARRANGEMENT_BEATS || !Number.isFinite(lengthBeats) || lengthBeats <= 0 || startBeats + lengthBeats > MAX_ARRANGEMENT_BEATS) {
+      throw new Error(`Arrangement clip start must be from 0 to ${MAX_ARRANGEMENT_BEATS} beats, length must be positive, and the clip must end inside that range.`);
+    }
+    if (name !== undefined && (!name.trim() || /[\u0000\r\n]/.test(name) || name.length > 128)) throw new Error("Clip name must be a single line of 1 to 128 characters.");
+    const trackName = await this.assertTrackName(trackIndex, expectedTrackName);
+    const args: OscArgument[] = [oscInt(trackIndex), trackName, oscFloat(startBeats), oscFloat(lengthBeats)];
+    if (name !== undefined) args.push(name);
+    return this.mutate("create_arrangement_midi_clip", input, [{ address: "/live/track/create_arrangement_midi_clip", args }], dryRun, async () => {
+      const clip = findCreatedMidiClip(await this.arrangementClips(trackIndex), startBeats, lengthBeats, name);
+      return { trackIndex, trackName, clip };
+    });
+  }
+
   async placeClipInArrangement(input: { trackIndex: number; sceneIndex: number; startBeats: number; endBeats: number; dryRun?: boolean }): Promise<ToolResult> {
     const { trackIndex, sceneIndex, startBeats, endBeats, dryRun = false } = input;
     trackIndexSchema.parse(trackIndex);
@@ -400,6 +417,12 @@ export class LiveTools {
     const names = (await this.live.query("/live/song/get/track_names")).args.map(String);
     if (trackIndex >= names.length) throw new Error(`Track index ${trackIndex} does not exist.`);
     return names[trackIndex];
+  }
+
+  private async assertTrackName(trackIndex: number, expectedTrackName: string): Promise<string> {
+    const actual = await this.assertTrack(trackIndex);
+    if (actual !== expectedTrackName) throw new Error(`Track safeguard failed: expected '${expectedTrackName}', found '${actual}'.`);
+    return actual;
   }
 
   private async assertDevice(trackIndex: number, deviceIndex: number): Promise<{ name: string; className: string }> {

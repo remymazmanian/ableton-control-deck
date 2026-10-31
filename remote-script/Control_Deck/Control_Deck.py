@@ -26,6 +26,8 @@ MAX_REQUEST_BYTES = 32768
 CHUNK_BYTES = 700
 MAX_QUEUE = 256
 MAX_RESPONSE_CACHE = 256
+# Live rejects arrangement clip times outside this range. See Track.create_midi_clip.
+MAX_ARRANGEMENT_BEATS = 1576800.0
 
 
 class ControlDeckBridge(ControlSurface):
@@ -346,6 +348,8 @@ class ControlDeckBridge(ControlSurface):
             while position < end - 0.0001:
                 track.duplicate_clip_to_arrangement(slot.clip, position)
                 position += step
+        elif address == "/live/track/create_arrangement_midi_clip":
+            self._create_arrangement_midi_clip(args)
         elif address == "/live/track/clear_arrangement":
             self._require_args(args, 2, address)
             _track_index, track = self._track(args)
@@ -449,6 +453,83 @@ class ControlDeckBridge(ControlSurface):
         if parameter_index < 0:
             raise BridgeError("INVALID_PARAMETER", "Parameter index must be non-negative")
         return parameter_index, parameter
+
+    def _create_arrangement_midi_clip(self, args):
+        # Track.create_midi_clip(start_time, length) inserts an empty Arrangement
+        # MIDI clip. The second value is the length in beats, not the end time.
+        # Live 12.1.10 added the method; earlier versions do not have it.
+        self._require_args(args, 4, "/live/track/create_arrangement_midi_clip")
+        _track_index, track = self._named_track(args)
+        start = self._finite_float(args[2], "Arrangement clip start")
+        length = self._finite_float(args[3], "Arrangement clip length")
+        if start < 0 or start > MAX_ARRANGEMENT_BEATS or length <= 0 or start + length > MAX_ARRANGEMENT_BEATS:
+            raise BridgeError("INVALID_RANGE", "Arrangement clip start must be from 0 to %s beats and the clip must end inside that range" % MAX_ARRANGEMENT_BEATS)
+        name = None
+        if len(args) >= 5 and str(args[4]).strip():
+            name = str(args[4]).replace("\x00", "").replace("\r", " ").replace("\n", " ").strip()
+            if len(name) > 128:
+                raise BridgeError("INVALID_REQUEST", "Clip name exceeds 128 characters")
+        create = getattr(track, "create_midi_clip", None)
+        if not callable(create):
+            raise BridgeError("LIVE_VERSION_UNSUPPORTED", "Track.create_midi_clip is not available in this Live (%s). It needs Live 12.1.10 or newer." % self._live_version_text())
+        try:
+            created = create(start, length)
+        except BridgeError:
+            raise
+        except Exception as error:
+            message = str(error)
+            if "overlap" in message.lower():
+                raise BridgeError("CLIP_OVERLAP", "An arrangement clip already occupies that time range on this track")
+            raise BridgeError("CLIP_NOT_CREATED", "Live did not create the arrangement MIDI clip (%s): %s" % (self._live_version_text(), message))
+        clip = created if self._looks_like_clip(created) else None
+        if clip is None:
+            matches = self._arrangement_clips_at(track, start, length)
+            if len(matches) != 1:
+                code = "CLIP_NOT_CONFIRMED" if len(matches) == 0 else "CLIP_AMBIGUOUS"
+                detail = "Live did not confirm the new arrangement MIDI clip" if len(matches) == 0 else "More than one arrangement clip matches that start and length"
+                raise BridgeError(code, detail)
+            clip = matches[0]
+        if name:
+            clip.name = name
+
+    def _named_track(self, args):
+        track_index, track = self._track(args)
+        expected = str(args[1])
+        if track.name != expected:
+            raise BridgeError("TRACK_IDENTITY_MISMATCH", "Expected track '%s', found '%s'" % (expected, track.name))
+        return track_index, track
+
+    def _live_version_text(self):
+        application = self.application()
+        try:
+            return "%s.%s.%s" % (application.get_major_version(), application.get_minor_version(), application.get_bugfix_version())
+        except Exception:
+            try:
+                return "%s.%s" % (application.get_major_version(), application.get_minor_version())
+            except Exception:
+                return "unknown"
+
+    def _finite_float(self, value, label):
+        try:
+            number = float(value)
+        except Exception:
+            raise BridgeError("INVALID_ARGUMENTS", "%s must be a number" % label)
+        if number != number or number in (float("inf"), float("-inf")):
+            raise BridgeError("INVALID_ARGUMENTS", "%s must be finite" % label)
+        return number
+
+    def _looks_like_clip(self, value):
+        if value is None or isinstance(value, (int, float, bool, str)):
+            return False
+        return hasattr(value, "start_time") and hasattr(value, "name")
+
+    def _arrangement_clips_at(self, track, start, length):
+        end = start + length
+        matches = []
+        for clip in track.arrangement_clips:
+            if abs(float(clip.start_time) - start) < 0.001 and abs(float(clip.end_time) - end) < 0.001:
+                matches.append(clip)
+        return matches
 
     def _clip_kind(self, clip):
         midi = self._clip_flag(clip, "is_midi_clip")

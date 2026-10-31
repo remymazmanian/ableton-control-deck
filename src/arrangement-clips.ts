@@ -1,4 +1,6 @@
 const CLIP_FIELDS = 4;
+export const MAX_ARRANGEMENT_BEATS = 1_576_800;
+const TIME_TOLERANCE = 0.001;
 
 export interface ArrangementClipDescriptor {
   index: number;
@@ -34,6 +36,17 @@ export function parseArrangementClips(args: readonly unknown[], expectedTrackInd
     });
   }
   return clips;
+}
+
+export function findCreatedMidiClip(clips: readonly ArrangementClipDescriptor[], startBeats: number, lengthBeats: number, name?: string): ArrangementClipDescriptor {
+  const endBeats = startBeats + lengthBeats;
+  const matches = clips.filter(clip => clip.kind === "midi" && Math.abs(clip.startBeats - startBeats) < TIME_TOLERANCE && Math.abs(clip.endBeats - endBeats) < TIME_TOLERANCE);
+  if (matches.length !== 1) {
+    throw new Error(matches.length === 0 ? "Live did not confirm the arrangement MIDI clip." : "More than one arrangement MIDI clip matches that start and length.");
+  }
+  const clip = matches[0];
+  if (name !== undefined && clip.name !== name) throw new Error(`Arrangement clip name verification failed: expected '${name}', found '${clip.name}'.`);
+  return clip;
 }
 
 function finiteNumber(value: unknown, label: string): number {

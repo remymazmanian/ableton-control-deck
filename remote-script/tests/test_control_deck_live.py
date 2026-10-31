@@ -94,6 +94,18 @@ class Track(object):
         self.devices = [Device()]
         self.arrangement_clips = []
 
+    def create_midi_clip(self, start, length):
+        start = float(start)
+        length = float(length)
+        end = start + length
+        for clip in self.arrangement_clips:
+            if start < float(clip.end_time) and end > float(clip.start_time):
+                raise RuntimeError("Clip overlaps with an existing arrangement clip")
+        created = types.SimpleNamespace(name="", start_time=start, end_time=end, length=length, is_midi_clip=True, is_audio_clip=False)
+        self.arrangement_clips.append(created)
+        self.arrangement_clips.sort(key=lambda clip: float(clip.start_time))
+        return created
+
 
 class Song(object):
     def __init__(self):
@@ -142,6 +154,45 @@ class ControlDeckLiveTests(unittest.TestCase):
         self.assertEqual(len(self.song.tracks), 2)
         with self.assertRaises(Exception):
             self.bridge._live_command({"address": "/live/song/save_as", "args": ["unsafe.als"]})
+
+    def test_creates_an_arrangement_midi_clip_and_names_it(self):
+        self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 8.0, 4.0, "Hook"]})
+        clip = self.song.tracks[0].arrangement_clips[0]
+        self.assertEqual((clip.name, clip.start_time, clip.end_time), ("Hook", 8.0, 12.0))
+        listed = self.bridge._live_query({"address": "/live/track/get/arrangement_clips", "args": [0]})
+        self.assertEqual(listed["args"], [0, "Hook", 8.0, 12.0, "midi"])
+
+    def test_create_arrangement_midi_clip_refuses_the_wrong_track_and_overlap(self):
+        with self.assertRaises(Exception) as mismatch:
+            self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Bass", 0.0, 4.0]})
+        self.assertIn("Bass", str(mismatch.exception))
+        self.assertEqual(self.song.tracks[0].arrangement_clips, [])
+        self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 0.0, 4.0]})
+        with self.assertRaises(Exception) as overlap:
+            self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 2.0, 4.0]})
+        self.assertIn("occupies", str(overlap.exception))
+        self.assertEqual(len(self.song.tracks[0].arrangement_clips), 1)
+
+    def test_names_the_new_clip_when_create_midi_clip_returns_a_zero_id(self):
+        # Live 12.1.10 created the clip but returned id 0. Naming must follow the clip, not that id.
+        track = self.song.tracks[0]
+        original = track.create_midi_clip
+
+        def create(start, length):
+            original(start, length)
+            return 0
+
+        track.create_midi_clip = create
+        self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 16.0, 4.0, "Drop"]})
+        self.assertEqual(track.arrangement_clips[0].name, "Drop")
+        self.assertEqual(track.arrangement_clips[0].end_time, 20.0)
+
+    def test_create_arrangement_midi_clip_reports_a_missing_live_method(self):
+        self.song.tracks[0].create_midi_clip = None
+        with self.assertRaises(Exception) as raised:
+            self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 0.0, 4.0]})
+        self.assertIn("12.1.10", str(raised.exception))
+        self.assertIn("12.4", str(raised.exception))
 
     def test_lists_arrangement_clips_with_midi_or_audio_kind(self):
         self.song.tracks[0].arrangement_clips = [

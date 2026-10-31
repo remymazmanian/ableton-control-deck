@@ -20,6 +20,13 @@ function fakeLive(state: { cues?: Array<[string, number]>; playhead?: number; pl
       if (address === "/live/song/delete_cue_point") live.cues = live.cues.filter(([, t]) => Math.abs(t - Number(v[0])) >= 0.001 || Math.abs(live.playhead - t) >= 0.001);
       if (address === "/live/cue_point/set_name") live.cues = live.cues.map(([n, t]) => [Math.abs(t - Number(v[0])) < 0.001 ? String(v[1]) : n, t]);
       if (address === "/live/track/clear_arrangement") live.clips = [];
+      if (address === "/live/track/create_arrangement_midi_clip") {
+        const start = Number(v[2]);
+        const length = Number(v[3]);
+        const end = start + length;
+        if (live.clips.some(clip => start < Number(clip[2]) && end > Number(clip[1]))) throw new Error("Clip overlaps");
+        live.clips.push([v.length >= 5 ? String(v[4]) : "", start, end, "midi"]);
+      }
       if (address === "/live/clip/fill_arrangement") {
         const step = state.sessionClipLength ?? 4;
         for (let p = Number(v[2]); p < Number(v[3]) - 0.0001; p += step) live.clips.push(["Loop", p, p + step, "midi"]);
@@ -96,6 +103,40 @@ describe("arrangement clips", () => {
     live.query.mockResolvedValue({ args: [0, "Beat", 0, 4] });
     const result = await new LiveTools(live as never, logger as never).listArrangementClips(0);
     expect(result).toMatchObject({ ok: false, error: { message: expect.stringMatching(/clip type/) } });
+  });
+
+  it("creates an arrangement MIDI clip at start plus length and reads it back", async () => {
+    const live = fakeLive();
+    const result = await new LiveTools(live as never, logger as never).createArrangementMidiClip({ trackIndex: 0, expectedTrackName: "Drums", startBeats: 8, lengthBeats: 4, name: "Hook" });
+    expect(result).toMatchObject({ ok: true, data: { trackName: "Drums", clip: { name: "Hook", startBeats: 8, endBeats: 12, lengthBeats: 4, kind: "midi" } } });
+    expect(live.clips).toEqual([["Hook", 8, 12, "midi"]]);
+  });
+
+  it("dry-runs the create command after the track name matches", async () => {
+    const live = fakeLive();
+    const result = await new LiveTools(live as never, logger as never).createArrangementMidiClip({ trackIndex: 0, expectedTrackName: "Drums", startBeats: 8, lengthBeats: 4, name: "Hook", dryRun: true });
+    expect(result).toMatchObject({ ok: true, dryRun: true, intendedOperations: [{ address: "/live/track/create_arrangement_midi_clip" }] });
+    expect(live.send).not.toHaveBeenCalled();
+  });
+
+  it("refuses a track name that does not match the index", async () => {
+    const live = fakeLive();
+    await expect(new LiveTools(live as never, logger as never).createArrangementMidiClip({ trackIndex: 0, expectedTrackName: "Bass", startBeats: 0, lengthBeats: 4 })).rejects.toThrow(/safeguard/);
+    expect(live.send).not.toHaveBeenCalled();
+  });
+
+  it("reports a Live that has no create_midi_clip instead of claiming success", async () => {
+    const live = fakeLive();
+    live.send.mockRejectedValue(new Error("Track.create_midi_clip is not available in this Live (12.0.5). It needs Live 12.1.10 or newer."));
+    const result = await new LiveTools(live as never, logger as never).createArrangementMidiClip({ trackIndex: 0, expectedTrackName: "Drums", startBeats: 0, lengthBeats: 4 });
+    expect(result).toMatchObject({ ok: false, error: { message: expect.stringMatching(/12\.1\.10/) } });
+  });
+
+  it("fails when the read-back does not show the new clip", async () => {
+    const live = fakeLive();
+    live.send.mockResolvedValue(undefined);
+    const result = await new LiveTools(live as never, logger as never).createArrangementMidiClip({ trackIndex: 0, expectedTrackName: "Drums", startBeats: 0, lengthBeats: 4, name: "Hook" });
+    expect(result).toMatchObject({ ok: false, error: { message: expect.stringMatching(/did not confirm/) } });
   });
 
   it("tiles a Session clip across a range and reports the copies", async () => {
