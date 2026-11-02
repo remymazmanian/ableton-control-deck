@@ -34,7 +34,7 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 
 - Status, transport, tempo, time signature, and song position with readback verification
 - List, create, rename, and safely delete tracks
-- Create Session View MIDI clips and write validated note content
+- Create Session View MIDI clips, write validated note content, and read a clip's notes back
 - Inspect scenes, clips, selection, devices, and every parameter Live exposes
 - Discover, resolve, and load VST3/VST2/AU plug-ins on an exact track through Live's Browser
 - Load native Live devices (Drum Rack, Echo, Reverb, ...) by exact Browser name with ambiguity refusal
