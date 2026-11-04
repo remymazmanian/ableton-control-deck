@@ -141,6 +141,20 @@ All tools follow the same contract: **exact targets** (mutations require indices
 - **create_midi_clip** — Create a Session View MIDI clip with an exact beat length.
 - **add_midi_notes** — Validate and add MIDI notes to a Session View clip. Pitches accept integers or Ableton-style note names (`C3` is MIDI 60).
 
+### Mixer
+
+Volume is set in dB. Live stores track and master volume as a normalized value from 0 (silence) to 1 (+6 dB), with 0 dB at about 0.85. The server converts dB with that documented curve, then reads back the normalized value and the display string Live shows (`str_for_value`). Trust the display string. Accepted range is -70 dB through +6 dB. -70 dB is sent as silence.
+
+Pan runs from -1 (left) through 0 (center) to 1 (right). Sends are addressed by `sendIndex` or by `sendName` (the send's parameter name or the return track's name). `level` is the normalized send parameter. On a standard send, 0 is silence and 1 is unity (0 dB). The call refuses a level outside the range Live reports for that send. Mute and solo take a boolean. Every setter requires the track index and its current name, except master volume, which has no track name. `get_mixer` always returns the master. Pass a track index and name to include that track's volume, pan, mute, solo, and sends.
+
+```json
+{ "tool": "set_track_volume", "arguments": { "trackIndex": 1, "expectedTrackName": "Bass", "db": -6 } }
+```
+
+```json
+{ "tool": "set_track_send", "arguments": { "trackIndex": 1, "expectedTrackName": "Bass", "sendName": "Delay", "level": 0.5 } }
+```
+
 ### Arrangement
 
 Note times below are beats from the start of the clip. Clip `startBeats` is the position in the Arrangement. `clipIndex` is the position in that track's `arrangement_clips` list, which `list_arrangement_clips` reports. Pass `clipIndex`, `startBeats`, or both. Both must describe the same clip. A start time that matches more than one clip is refused.

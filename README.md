@@ -36,6 +36,7 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 - List, create, rename, and safely delete tracks
 - Create Session View MIDI clips and write validated note content
 - Inspect scenes, clips, selection, devices, and every parameter Live exposes
+- Read and set mixer volume (dB), pan, sends, mute, and solo, plus master volume. Each write reads back the value Live stored and its display string.
 - Discover, resolve, and load VST3/VST2/AU plug-ins on an exact track through Live's Browser
 - Load native Live devices (Drum Rack, Echo, Reverb, ...) by exact Browser name with ambiguity refusal
 - Read and set third-party plug-in parameters with normalized values and readback

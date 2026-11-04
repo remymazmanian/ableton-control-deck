@@ -1,5 +1,6 @@
 import { findCreatedMidiClip, MAX_ARRANGEMENT_BEATS, MAX_NOTES_PER_CALL, notesStartingInRange, parseArrangementClips, parseArrangementNotes, resolveArrangementClip, verifyAddedNotes, verifyModifiedNotes, verifyRemovedNotes, type ArrangementClipDescriptor, type ArrangementNote } from "./arrangement-clips.js";
 import { JsonLogger } from "./logger.js";
+import { assertPan, assertSendLevel, dbToLiveVolume, parseMasterVolumeReply, parseTrackMixerReply, resolveSend, type MasterVolume, type TrackMixer } from "./mixer.js";
 import { oscFloat, oscInt, type LiveControlClient, type OscArgument, type ToolResult } from "./types.js";
 import { noteNameToMidi, trackIndexSchema, validateNotes } from "./validation.js";
 
@@ -164,6 +165,68 @@ export class LiveTools {
       const values = await Promise.all(props.map(prop => this.live.query(`/live/track/get/${prop}`, arg).then(reply => last(reply.args))));
       const data = Object.fromEntries(props.map((prop, index) => [prop, values[index]]));
       return { index: trackIndex, id: `track:${trackIndex}`, name: names[trackIndex], canBeArmed: bool(data.can_be_armed), armed: bool(data.arm), muted: bool(data.mute), soloed: bool(data.solo), isGroup: bool(data.is_foldable), isGrouped: bool(data.is_grouped), playingSlotIndex: Number(data.playing_slot_index), volume: Number(data.volume), pan: Number(data.panning) };
+    });
+  }
+
+  getMixer(input: { trackIndex?: number; expectedTrackName?: string } = {}): Promise<ToolResult> {
+    return this.read("get_mixer", async () => {
+      const master = await this.masterVolume();
+      if (input.trackIndex === undefined) return { master };
+      const track = await this.namedTrackMixer(input.trackIndex, input.expectedTrackName);
+      return { master, track };
+    });
+  }
+
+  async setTrackVolume(input: { trackIndex: number; expectedTrackName: string; db: number; dryRun?: boolean }): Promise<ToolResult> {
+    const normalized = dbToLiveVolume(input.db);
+    const trackName = await this.assertTrackName(input.trackIndex, input.expectedTrackName);
+    const operation = { address: "/live/track/set/volume", args: [oscInt(input.trackIndex), trackName, oscFloat(normalized)] };
+    return this.mutate("set_track_volume", input, [operation], input.dryRun ?? false, async () => {
+      const track = await this.trackMixer(input.trackIndex, trackName);
+      this.assertClose(track.volume, normalized, `Volume verification failed: sent ${normalized}, Live reports ${track.volume} (${track.volumeDisplay}).`);
+      return { trackIndex: input.trackIndex, trackName, requestedDb: input.db, normalizedValue: normalized, value: track.volume, displayValue: track.volumeDisplay, db: track.db };
+    });
+  }
+
+  async setTrackPan(input: { trackIndex: number; expectedTrackName: string; pan: number; dryRun?: boolean }): Promise<ToolResult> {
+    assertPan(input.pan);
+    const trackName = await this.assertTrackName(input.trackIndex, input.expectedTrackName);
+    const operation = { address: "/live/track/set/panning", args: [oscInt(input.trackIndex), trackName, oscFloat(input.pan)] };
+    return this.mutate("set_track_pan", input, [operation], input.dryRun ?? false, async () => {
+      const track = await this.trackMixer(input.trackIndex, trackName);
+      this.assertClose(track.pan, input.pan, `Pan verification failed: sent ${input.pan}, Live reports ${track.pan} (${track.panDisplay}).`);
+      return { trackIndex: input.trackIndex, trackName, pan: track.pan, displayValue: track.panDisplay };
+    });
+  }
+
+  async setTrackSend(input: { trackIndex: number; expectedTrackName: string; sendIndex?: number; sendName?: string; level: number; dryRun?: boolean }): Promise<ToolResult> {
+    const trackName = await this.assertTrackName(input.trackIndex, input.expectedTrackName);
+    const current = await this.trackMixer(input.trackIndex, trackName);
+    const send = resolveSend(current.sends, input);
+    assertSendLevel(input.level, send.minimum, send.maximum);
+    const operation = { address: "/live/track/set/send", args: [oscInt(input.trackIndex), trackName, oscInt(send.index), send.name, oscFloat(input.level)] };
+    return this.mutate("set_track_send", input, [operation], input.dryRun ?? false, async () => {
+      const updated = resolveSend((await this.trackMixer(input.trackIndex, trackName)).sends, { sendIndex: send.index, sendName: send.name });
+      this.assertClose(updated.level, input.level, `Send verification failed: sent ${input.level}, Live reports ${updated.level} (${updated.displayValue}).`);
+      return { trackIndex: input.trackIndex, trackName, sendIndex: updated.index, sendName: updated.name, returnName: updated.returnName, level: updated.level, displayValue: updated.displayValue };
+    });
+  }
+
+  async setTrackMute(input: { trackIndex: number; expectedTrackName: string; mute: boolean; dryRun?: boolean }): Promise<ToolResult> {
+    return this.setTrackFlag("set_track_mute", "/live/track/set/mute", "mute", input);
+  }
+
+  async setTrackSolo(input: { trackIndex: number; expectedTrackName: string; solo: boolean; dryRun?: boolean }): Promise<ToolResult> {
+    return this.setTrackFlag("set_track_solo", "/live/track/set/solo", "solo", input);
+  }
+
+  async setMasterVolume(input: { db: number; dryRun?: boolean }): Promise<ToolResult> {
+    const normalized = dbToLiveVolume(input.db);
+    const operation = { address: "/live/song/set/master_volume", args: [oscFloat(normalized)] };
+    return this.mutate("set_master_volume", input, [operation], input.dryRun ?? false, async () => {
+      const master = await this.masterVolume();
+      this.assertClose(master.volume, normalized, `Master volume verification failed: sent ${normalized}, Live reports ${master.volume} (${master.displayValue}).`);
+      return { requestedDb: input.db, normalizedValue: normalized, value: master.volume, displayValue: master.displayValue, db: master.db };
     });
   }
 
@@ -501,6 +564,41 @@ export class LiveTools {
       if (clips.length) throw new Error(`${clips.length} arrangement clips remain on track ${trackIndex}.`);
       return { trackIndex, cleared: true };
     });
+  }
+
+  private async namedTrackMixer(trackIndex: number, expectedTrackName: string | undefined): Promise<TrackMixer> {
+    trackIndexSchema.parse(trackIndex);
+    if (!expectedTrackName?.trim()) throw new Error("Expected track name must not be empty.");
+    const trackName = await this.assertTrackName(trackIndex, expectedTrackName);
+    return this.trackMixer(trackIndex, trackName);
+  }
+
+  private async trackMixer(trackIndex: number, trackName: string): Promise<TrackMixer> {
+    const reply = await this.live.query("/live/track/get/mixer", [oscInt(trackIndex)]);
+    const mixer = parseTrackMixerReply(reply.args, trackName);
+    if (mixer.index !== trackIndex) throw new Error(`Mixer reply was addressed to track ${mixer.index}, not track ${trackIndex}.`);
+    return mixer;
+  }
+
+  private async masterVolume(): Promise<MasterVolume> {
+    return parseMasterVolumeReply((await this.live.query("/live/song/get/master_volume")).args);
+  }
+
+  private async setTrackFlag(tool: "set_track_mute" | "set_track_solo", address: string, field: "mute" | "solo", input: { trackIndex: number; expectedTrackName: string; mute?: boolean; solo?: boolean; dryRun?: boolean }): Promise<ToolResult> {
+    const value = field === "mute" ? input.mute : input.solo;
+    if (typeof value !== "boolean") throw new Error(`${field} must be a boolean.`);
+    const trackName = await this.assertTrackName(input.trackIndex, input.expectedTrackName);
+    const operation = { address, args: [oscInt(input.trackIndex), trackName, value] };
+    return this.mutate(tool, input, [operation], input.dryRun ?? false, async () => {
+      const track = await this.trackMixer(input.trackIndex, trackName);
+      const actual = field === "mute" ? track.muted : track.soloed;
+      if (actual !== value) throw new Error(`${field} verification failed: expected ${value}, Live reports ${actual}.`);
+      return { trackIndex: input.trackIndex, trackName, [field === "mute" ? "muted" : "soloed"]: actual };
+    });
+  }
+
+  private assertClose(actual: number, expected: number, message: string): void {
+    if (Math.abs(actual - expected) > 0.001) throw new Error(message);
   }
 
   private async assertTrack(trackIndex: number): Promise<string> {
