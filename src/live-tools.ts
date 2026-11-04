@@ -1,5 +1,7 @@
 import { findCreatedMidiClip, MAX_ARRANGEMENT_BEATS, MAX_NOTES_PER_CALL, notesStartingInRange, parseArrangementClips, parseArrangementNotes, resolveArrangementClip, verifyAddedNotes, verifyModifiedNotes, verifyRemovedNotes, type ArrangementClipDescriptor, type ArrangementNote } from "./arrangement-clips.js";
 import { JsonLogger } from "./logger.js";
+import { assertPan, assertSendLevel, dbToLiveVolume, parseMasterVolumeReply, parseTrackMixerReply, resolveSend, type MasterVolume, type TrackMixer } from "./mixer.js";
+import { ARRANGEMENT_ADD_NOTES_PER_DATAGRAM, ARRANGEMENT_MODIFY_NOTES_PER_DATAGRAM, chunkOscNotes, DatagramBudgetError, noteBatchErrorBody, NoteBatchPartialError, readBackFailed, sendChunksSequentially } from "./note-chunks.js";
 import { assertColorIndex, formatRgb, parseRgb, parseTrackColorReply, type TrackColor } from "./track-color.js";
 import { oscFloat, oscInt, type LiveControlClient, type OscArgument, type ToolResult } from "./types.js";
 import { noteNameToMidi, trackIndexSchema, validateNotes } from "./validation.js";
@@ -165,6 +167,68 @@ export class LiveTools {
       const values = await Promise.all(props.map(prop => this.live.query(`/live/track/get/${prop}`, arg).then(reply => last(reply.args))));
       const data = Object.fromEntries(props.map((prop, index) => [prop, values[index]]));
       return { index: trackIndex, id: `track:${trackIndex}`, name: names[trackIndex], canBeArmed: bool(data.can_be_armed), armed: bool(data.arm), muted: bool(data.mute), soloed: bool(data.solo), isGroup: bool(data.is_foldable), isGrouped: bool(data.is_grouped), playingSlotIndex: Number(data.playing_slot_index), volume: Number(data.volume), pan: Number(data.panning) };
+    });
+  }
+
+  getMixer(input: { trackIndex?: number; expectedTrackName?: string } = {}): Promise<ToolResult> {
+    return this.read("get_mixer", async () => {
+      const master = await this.masterVolume();
+      if (input.trackIndex === undefined) return { master };
+      const track = await this.namedTrackMixer(input.trackIndex, input.expectedTrackName);
+      return { master, track };
+    });
+  }
+
+  async setTrackVolume(input: { trackIndex: number; expectedTrackName: string; db: number; dryRun?: boolean }): Promise<ToolResult> {
+    const normalized = dbToLiveVolume(input.db);
+    const trackName = await this.assertTrackName(input.trackIndex, input.expectedTrackName);
+    const operation = { address: "/live/track/set/volume", args: [oscInt(input.trackIndex), trackName, oscFloat(normalized)] };
+    return this.mutate("set_track_volume", input, [operation], input.dryRun ?? false, async () => {
+      const track = await this.trackMixer(input.trackIndex, trackName);
+      this.assertClose(track.volume, normalized, `Volume verification failed: sent ${normalized}, Live reports ${track.volume} (${track.volumeDisplay}).`);
+      return { trackIndex: input.trackIndex, trackName, requestedDb: input.db, normalizedValue: normalized, value: track.volume, displayValue: track.volumeDisplay, db: track.db };
+    });
+  }
+
+  async setTrackPan(input: { trackIndex: number; expectedTrackName: string; pan: number; dryRun?: boolean }): Promise<ToolResult> {
+    assertPan(input.pan);
+    const trackName = await this.assertTrackName(input.trackIndex, input.expectedTrackName);
+    const operation = { address: "/live/track/set/panning", args: [oscInt(input.trackIndex), trackName, oscFloat(input.pan)] };
+    return this.mutate("set_track_pan", input, [operation], input.dryRun ?? false, async () => {
+      const track = await this.trackMixer(input.trackIndex, trackName);
+      this.assertClose(track.pan, input.pan, `Pan verification failed: sent ${input.pan}, Live reports ${track.pan} (${track.panDisplay}).`);
+      return { trackIndex: input.trackIndex, trackName, pan: track.pan, displayValue: track.panDisplay };
+    });
+  }
+
+  async setTrackSend(input: { trackIndex: number; expectedTrackName: string; sendIndex?: number; sendName?: string; level: number; dryRun?: boolean }): Promise<ToolResult> {
+    const trackName = await this.assertTrackName(input.trackIndex, input.expectedTrackName);
+    const current = await this.trackMixer(input.trackIndex, trackName);
+    const send = resolveSend(current.sends, input);
+    assertSendLevel(input.level, send.minimum, send.maximum);
+    const operation = { address: "/live/track/set/send", args: [oscInt(input.trackIndex), trackName, oscInt(send.index), send.name, oscFloat(input.level)] };
+    return this.mutate("set_track_send", input, [operation], input.dryRun ?? false, async () => {
+      const updated = resolveSend((await this.trackMixer(input.trackIndex, trackName)).sends, { sendIndex: send.index, sendName: send.name });
+      this.assertClose(updated.level, input.level, `Send verification failed: sent ${input.level}, Live reports ${updated.level} (${updated.displayValue}).`);
+      return { trackIndex: input.trackIndex, trackName, sendIndex: updated.index, sendName: updated.name, returnName: updated.returnName, level: updated.level, displayValue: updated.displayValue };
+    });
+  }
+
+  async setTrackMute(input: { trackIndex: number; expectedTrackName: string; mute: boolean; dryRun?: boolean }): Promise<ToolResult> {
+    return this.setTrackFlag("set_track_mute", "/live/track/set/mute", "mute", input);
+  }
+
+  async setTrackSolo(input: { trackIndex: number; expectedTrackName: string; solo: boolean; dryRun?: boolean }): Promise<ToolResult> {
+    return this.setTrackFlag("set_track_solo", "/live/track/set/solo", "solo", input);
+  }
+
+  async setMasterVolume(input: { db: number; dryRun?: boolean }): Promise<ToolResult> {
+    const normalized = dbToLiveVolume(input.db);
+    const operation = { address: "/live/song/set/master_volume", args: [oscFloat(normalized)] };
+    return this.mutate("set_master_volume", input, [operation], input.dryRun ?? false, async () => {
+      const master = await this.masterVolume();
+      this.assertClose(master.volume, normalized, `Master volume verification failed: sent ${normalized}, Live reports ${master.volume} (${master.displayValue}).`);
+      return { requestedDb: input.db, normalizedValue: normalized, value: master.volume, displayValue: master.displayValue, db: master.db };
     });
   }
 
@@ -470,12 +534,24 @@ export class LiveTools {
     const valid = validateNotes(input.notes);
     if (valid.length > MAX_NOTES_PER_CALL) throw new Error(`At most ${MAX_NOTES_PER_CALL} notes can be added at once.`);
     const { trackName, clip } = await this.requireArrangementMidiClip(input);
-    const args = this.arrangementNoteArgs(input.trackIndex, trackName, clip);
-    for (const note of valid) args.push(oscInt(note.pitch), oscFloat(note.startTime), oscFloat(note.duration), oscInt(note.velocity), note.mute);
-    return this.mutate("add_arrangement_clip_notes", input, [{ address: "/live/arrangement_clip/add/notes", args }], input.dryRun ?? false, async () => {
+    const prefix = this.arrangementNoteArgs(input.trackIndex, trackName, clip);
+    const address = "/live/arrangement_clip/add/notes";
+    let chunks: typeof valid[];
+    try {
+      chunks = chunkOscNotes(this.live, valid, {
+        address,
+        prefix,
+        maxPerChunk: ARRANGEMENT_ADD_NOTES_PER_DATAGRAM,
+        encode: note => [oscInt(note.pitch), oscFloat(note.startTime), oscFloat(note.duration), oscInt(note.velocity), note.mute]
+      });
+    } catch (error) {
+      if (error instanceof DatagramBudgetError) return { ok: false, dryRun: false, tool: "add_arrangement_clip_notes", error: { code: "REQUEST_TOO_LARGE", message: error.message } };
+      throw error;
+    }
+    return this.commitNoteChunks("add_arrangement_clip_notes", input, address, prefix, chunks, note => [oscInt(note.pitch), oscFloat(note.startTime), oscFloat(note.duration), oscInt(note.velocity), note.mute], input.dryRun ?? false, async () => {
       const parsed = await this.readArrangementNotes(input.trackIndex, clip, this.arrangementNoteArgs(input.trackIndex, trackName, clip));
       verifyAddedNotes(valid, parsed.notes);
-      return { trackIndex: input.trackIndex, trackName, clip, noteCountRequested: valid.length, noteCountInClip: parsed.notes.length, notes: parsed.notes };
+      return { trackIndex: input.trackIndex, trackName, clip, noteCountRequested: valid.length, noteCountInClip: parsed.notes.length, chunks: chunks.length, chunkNoteCounts: chunks.map(chunk => chunk.length), notes: parsed.notes };
     });
   }
 
@@ -502,12 +578,20 @@ export class LiveTools {
       assertOutgoingNote(next, change.velocity === undefined ? 0 : 1);
       return next;
     });
-    const args = this.arrangementNoteArgs(input.trackIndex, trackName, clip);
-    for (const note of desired) args.push(oscInt(note.noteId), oscInt(note.pitch), oscFloat(note.startTime), oscFloat(note.duration), oscInt(note.velocity), note.mute);
-    return this.mutate("modify_arrangement_clip_notes", input, [{ address: "/live/arrangement_clip/modify/notes", args }], input.dryRun ?? false, async () => {
+    const prefix = this.arrangementNoteArgs(input.trackIndex, trackName, clip);
+    const address = "/live/arrangement_clip/modify/notes";
+    const encode = (note: ArrangementNote): OscArgument[] => [oscInt(note.noteId), oscInt(note.pitch), oscFloat(note.startTime), oscFloat(note.duration), oscInt(note.velocity), note.mute];
+    let chunks: ArrangementNote[][];
+    try {
+      chunks = chunkOscNotes(this.live, desired, { address, prefix, maxPerChunk: ARRANGEMENT_MODIFY_NOTES_PER_DATAGRAM, encode });
+    } catch (error) {
+      if (error instanceof DatagramBudgetError) return { ok: false, dryRun: false, tool: "modify_arrangement_clip_notes", error: { code: "REQUEST_TOO_LARGE", message: error.message } };
+      throw error;
+    }
+    return this.commitNoteChunks("modify_arrangement_clip_notes", input, address, prefix, chunks, encode, input.dryRun ?? false, async () => {
       const parsed = await this.readArrangementNotes(input.trackIndex, clip, this.arrangementNoteArgs(input.trackIndex, trackName, clip));
       verifyModifiedNotes(desired, parsed.notes);
-      return { trackIndex: input.trackIndex, trackName, clip, noteCountModified: desired.length, noteCountInClip: parsed.notes.length, notes: parsed.notes };
+      return { trackIndex: input.trackIndex, trackName, clip, noteCountModified: desired.length, noteCountInClip: parsed.notes.length, chunks: chunks.length, chunkNoteCounts: chunks.map(chunk => chunk.length), notes: parsed.notes };
     });
   }
 
@@ -549,6 +633,68 @@ export class LiveTools {
       if (clips.length) throw new Error(`${clips.length} arrangement clips remain on track ${trackIndex}.`);
       return { trackIndex, cleared: true };
     });
+  }
+
+  private async namedTrackMixer(trackIndex: number, expectedTrackName: string | undefined): Promise<TrackMixer> {
+    trackIndexSchema.parse(trackIndex);
+    if (!expectedTrackName?.trim()) throw new Error("Expected track name must not be empty.");
+    const trackName = await this.assertTrackName(trackIndex, expectedTrackName);
+    return this.trackMixer(trackIndex, trackName);
+  }
+
+  private async trackMixer(trackIndex: number, trackName: string): Promise<TrackMixer> {
+    const reply = await this.live.query("/live/track/get/mixer", [oscInt(trackIndex)]);
+    const mixer = parseTrackMixerReply(reply.args, trackName);
+    if (mixer.index !== trackIndex) throw new Error(`Mixer reply was addressed to track ${mixer.index}, not track ${trackIndex}.`);
+    return mixer;
+  }
+
+  private async masterVolume(): Promise<MasterVolume> {
+    return parseMasterVolumeReply((await this.live.query("/live/song/get/master_volume")).args);
+  }
+
+  private async setTrackFlag(tool: "set_track_mute" | "set_track_solo", address: string, field: "mute" | "solo", input: { trackIndex: number; expectedTrackName: string; mute?: boolean; solo?: boolean; dryRun?: boolean }): Promise<ToolResult> {
+    const value = field === "mute" ? input.mute : input.solo;
+    if (typeof value !== "boolean") throw new Error(`${field} must be a boolean.`);
+    const trackName = await this.assertTrackName(input.trackIndex, input.expectedTrackName);
+    const operation = { address, args: [oscInt(input.trackIndex), trackName, value] };
+    return this.mutate(tool, input, [operation], input.dryRun ?? false, async () => {
+      const track = await this.trackMixer(input.trackIndex, trackName);
+      const actual = field === "mute" ? track.muted : track.soloed;
+      if (actual !== value) throw new Error(`${field} verification failed: expected ${value}, Live reports ${actual}.`);
+      return { trackIndex: input.trackIndex, trackName, [field === "mute" ? "muted" : "soloed"]: actual };
+    });
+  }
+
+  private assertClose(actual: number, expected: number, message: string): void {
+    if (Math.abs(actual - expected) > 0.001) throw new Error(message);
+  }
+
+  private async commitNoteChunks<T, R>(tool: string, input: unknown, address: string, prefix: readonly OscArgument[], chunks: readonly (readonly T[])[], encode: (item: T) => readonly OscArgument[], dryRun: boolean, verify: () => Promise<R>): Promise<ToolResult<R>> {
+    const operations = chunks.map(chunk => ({ address, args: [...prefix, ...chunk.flatMap(item => encode(item))] }));
+    if (dryRun || this.defaultDryRun) return this.mutate(tool, input, operations, true, async () => ({} as R));
+    const started = performance.now();
+    try {
+      await sendChunksSequentially(chunks, async chunk => {
+        await this.live.send(address, [...prefix, ...chunk.flatMap(item => encode(item))]);
+      });
+    } catch (error) {
+      if (error instanceof NoteBatchPartialError) return this.noteBatchFailure<R>(tool, started, error);
+      return this.fail<R>(tool, started, error);
+    }
+    try {
+      const data = await verify();
+      await this.logger.write({ tool, args: input, liveOperation: operations, response: data, durationMs: performance.now() - started, success: true });
+      return { ok: true, dryRun: false, tool, data };
+    } catch (error) {
+      const notesRequested = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+      return this.noteBatchFailure(tool, started, readBackFailed(notesRequested, chunks.length, error));
+    }
+  }
+
+  private async noteBatchFailure<R>(tool: string, started: number, error: NoteBatchPartialError): Promise<ToolResult<R>> {
+    await this.logger.write({ tool, durationMs: performance.now() - started, success: false, error: error.message, notesLanded: error.notesLanded, chunksCompleted: error.chunksCompleted });
+    return { ok: false, dryRun: false, tool, error: noteBatchErrorBody(error) };
   }
 
   private async assertTrack(trackIndex: number): Promise<string> {
