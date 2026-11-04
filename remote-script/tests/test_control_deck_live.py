@@ -152,6 +152,8 @@ class Track(object):
         self.is_foldable = False
         self.is_grouped = False
         self.playing_slot_index = -1
+        self.color = 0xFF7700
+        self.color_index = 60
         self.mixer_device = types.SimpleNamespace(
             volume=Parameter("Volume", 0.85),
             panning=Parameter("Pan", 0.0, -1.0, 1.0),
@@ -226,6 +228,29 @@ class ControlDeckLiveTests(unittest.TestCase):
         self.assertEqual(tracks["args"], ["Synth"])
         params = self.bridge._live_query({"address": "/live/device/get/parameters/value_string", "args": [0, 0]})
         self.assertEqual(params["args"], [0, 0, "1.00", "0.50"])
+
+    def test_sets_palette_index_or_rgb_and_reads_the_color_back(self):
+        listed = self.bridge._live_query({"address": "/live/track/get/color", "args": [0]})
+        self.assertEqual(listed["args"], [0, 0xFF7700, 60])
+        self.bridge._live_command({"address": "/live/track/set/color", "args": [0, "Synth", "index", 14]})
+        self.assertEqual(self.song.tracks[0].color_index, 14)
+        self.bridge._live_command({"address": "/live/track/set/color", "args": [0, "Synth", "rgb", 0x112233]})
+        updated = self.bridge._live_query({"address": "/live/track/get/color", "args": [0]})
+        self.assertEqual(updated["args"][1], 0x112233)
+        self.assertEqual(updated["args"][2], 14)
+
+        with self.assertRaises(Exception) as mismatch:
+            self.bridge._live_command({"address": "/live/track/set/color", "args": [0, "Bass", "index", 1]})
+        self.assertIn("Bass", str(mismatch.exception))
+        self.assertEqual(self.song.tracks[0].color, 0x112233)
+
+        with self.assertRaises(Exception) as palette:
+            self.bridge._live_command({"address": "/live/track/set/color", "args": [0, "Synth", "index", 70]})
+        self.assertIn("color index", str(palette.exception))
+        with self.assertRaises(Exception) as rgb:
+            self.bridge._live_command({"address": "/live/track/set/color", "args": [0, "Synth", "rgb", 0x1000000]})
+        self.assertIn("RGB", str(rgb.exception))
+        self.assertEqual(self.song.tracks[0].color_index, 14)
 
     def test_reads_and_sets_mixer_volume_pan_sends_mute_solo_and_master(self):
         track = self.song.tracks[0]

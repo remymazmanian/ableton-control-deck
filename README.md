@@ -34,6 +34,7 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 
 - Status, transport, tempo, time signature, and song position with readback verification
 - List, create, rename, and safely delete tracks
+- Read and set a track's color from a Live palette index or an RGB hex value. Live snaps RGB to the nearest palette color, and the tool reads the snapped color back.
 - Create Session View MIDI clips and write validated note content. Note writes larger than one UDP datagram are split into ordered batches and applied to the same clip.
 - Inspect scenes, clips, selection, devices, and every parameter Live exposes
 - Read and set mixer volume (dB), pan, sends, mute, and solo, plus master volume. Each write reads back the value Live stored and its display string.
