@@ -132,6 +132,7 @@ All tools follow the same contract: **exact targets** (mutations require indices
 
 - **list_tracks** — List tracks with stable explicit index identifiers.
 - **get_track** — Inspect one track by explicit current index.
+- **get_track_color / set_track_color** — Read or set a track's color. `colorIndex` is a Live palette swatch from 0 through 69. `rgb` is a hex color such as `#FF5500`, stored as `Track.color`. Live snaps RGB to the nearest palette color, so the RGB read back can differ from the one you sent; `colorIndex` is the swatch Live kept. Setting a color requires the track index and its current name.
 - **create_midi_track / create_audio_track** — Create a track at an index (`-1` appends).
 - **rename_track** — Rename a track selected by explicit index.
 - **delete_track** — Delete a track by explicit index; `confirm: true` is mandatory except in dry-run mode.

@@ -218,6 +218,8 @@ class ControlDeckBridge(ControlSurface):
                 values = [track_index, self._json_value(getattr(track, prop))]
             elif prop in {"volume", "panning"}:
                 values = [track_index, self._json_value(getattr(track.mixer_device, prop).value)]
+            elif prop == "color":
+                values = [track_index, int(track.color), int(track.color_index)]
             elif prop == "clips/name":
                 values = [track_index] + [slot.clip.name if slot.clip else None for slot in track.clip_slots]
             elif prop == "clips/length":
@@ -306,6 +308,8 @@ class ControlDeckBridge(ControlSurface):
             if prop not in allowed:
                 raise BridgeError("ADDRESS_NOT_ALLOWED", "Unsupported song mutation: %s" % address)
             setattr(song, prop, args[0])
+        elif address == "/live/track/set/color":
+            self._set_track_color(args)
         elif address == "/live/track/set/name":
             self._require_args(args, 2, address)
             _track_index, track = self._track(args)
@@ -511,6 +515,34 @@ class ControlDeckBridge(ControlSurface):
             clip = matches[0]
         if name:
             clip.name = name
+
+    def _set_track_color(self, args):
+        # args: track index, expected name, "index" or "rgb", value.
+        # Live snaps an RGB integer to the nearest palette color. The caller reads color back.
+        self._require_args(args, 4, "/live/track/set/color")
+        _track_index, track = self._named_track(args)
+        mode = str(args[2])
+        if mode == "index":
+            track.color_index = self._palette_index(args[3])
+        elif mode == "rgb":
+            track.color = self._rgb_int(args[3])
+        else:
+            raise BridgeError("INVALID_ARGUMENTS", "Color mode must be index or rgb")
+
+    def _palette_index(self, value):
+        number = self._color_int(value, "color index", 69)
+        return number
+
+    def _rgb_int(self, value):
+        return self._color_int(value, "RGB color", 0xFFFFFF)
+
+    def _color_int(self, value, label, high):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise BridgeError("INVALID_RANGE", "%s must be an integer from 0 to %d" % (label, high))
+        number = float(value)
+        if number != number or not number.is_integer() or number < 0 or number > high:
+            raise BridgeError("INVALID_RANGE", "%s must be an integer from 0 to %d" % (label, high))
+        return int(number)
 
     def _named_track(self, args):
         track_index, track = self._track(args)

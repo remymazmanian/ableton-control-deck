@@ -1,5 +1,6 @@
 import { findCreatedMidiClip, MAX_ARRANGEMENT_BEATS, MAX_NOTES_PER_CALL, notesStartingInRange, parseArrangementClips, parseArrangementNotes, resolveArrangementClip, verifyAddedNotes, verifyModifiedNotes, verifyRemovedNotes, type ArrangementClipDescriptor, type ArrangementNote } from "./arrangement-clips.js";
 import { JsonLogger } from "./logger.js";
+import { assertColorIndex, formatRgb, parseRgb, parseTrackColorReply, type TrackColor } from "./track-color.js";
 import { oscFloat, oscInt, type LiveControlClient, type OscArgument, type ToolResult } from "./types.js";
 import { noteNameToMidi, trackIndexSchema, validateNotes } from "./validation.js";
 
@@ -183,6 +184,53 @@ export class LiveTools {
       }
       return { tracks };
     });
+  }
+
+  getTrackColor(input: { trackIndex: number; expectedTrackName?: string }): Promise<ToolResult> {
+    return this.read("get_track_color", async () => {
+      const color = await this.readTrackColor(input.trackIndex, input.expectedTrackName);
+      return this.colorPayload(input.trackIndex, color.name, color);
+    });
+  }
+
+  async setTrackColor(input: { trackIndex: number; expectedTrackName: string; colorIndex?: number; rgb?: string; dryRun?: boolean }): Promise<ToolResult> {
+    if (input.colorIndex !== undefined && input.rgb !== undefined) throw new Error("Pass colorIndex or rgb, not both.");
+    if (input.colorIndex === undefined && input.rgb === undefined) throw new Error("Pass colorIndex or rgb.");
+    const trackName = await this.requireNamedTrack(input.trackIndex, input.expectedTrackName);
+    if (input.colorIndex !== undefined) {
+      assertColorIndex(input.colorIndex);
+      const requested = input.colorIndex;
+      return this.mutate("set_track_color", input, [{ address: "/live/track/set/color", args: [oscInt(input.trackIndex), trackName, "index", oscInt(requested)] }], input.dryRun ?? false, async () => {
+        const color = await this.readTrackColor(input.trackIndex, trackName);
+        if (color.colorIndex !== requested) throw new Error(`Color verification failed: requested palette index ${requested}, Live reports ${color.colorIndex} (${color.rgb}).`);
+        return { ...this.colorPayload(input.trackIndex, trackName, color), requestedColorIndex: requested, snapped: false };
+      });
+    }
+    const requested = parseRgb(input.rgb as string);
+    return this.mutate("set_track_color", input, [{ address: "/live/track/set/color", args: [oscInt(input.trackIndex), trackName, "rgb", oscInt(requested)] }], input.dryRun ?? false, async () => {
+      const color = await this.readTrackColor(input.trackIndex, trackName);
+      return { ...this.colorPayload(input.trackIndex, trackName, color), requestedRgb: formatRgb(requested), snapped: (color.color & 0xffffff) !== requested };
+    });
+  }
+
+  private async readTrackColor(trackIndex: number, expectedTrackName?: string): Promise<TrackColor & { name: string }> {
+    trackIndexSchema.parse(trackIndex);
+    const name = expectedTrackName === undefined
+      ? await this.assertTrack(trackIndex)
+      : await this.requireNamedTrack(trackIndex, expectedTrackName);
+    const color = parseTrackColorReply((await this.live.query("/live/track/get/color", [oscInt(trackIndex)])).args);
+    if (color.index !== trackIndex) throw new Error(`Color reply was addressed to track ${color.index}, not track ${trackIndex}.`);
+    return { ...color, name };
+  }
+
+  private async requireNamedTrack(trackIndex: number, expectedTrackName: string): Promise<string> {
+    trackIndexSchema.parse(trackIndex);
+    if (!expectedTrackName.trim()) throw new Error("Expected track name must not be empty.");
+    return this.assertTrackName(trackIndex, expectedTrackName);
+  }
+
+  private colorPayload(trackIndex: number, trackName: string, color: TrackColor): { trackIndex: number; trackName: string; color: number; rgb: string; colorIndex: number } {
+    return { trackIndex, trackName, color: color.color, rgb: color.rgb, colorIndex: color.colorIndex };
   }
 
   listDevices(trackIndex: number): Promise<ToolResult> {

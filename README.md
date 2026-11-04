@@ -34,6 +34,7 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 
 - Status, transport, tempo, time signature, and song position with readback verification
 - List, create, rename, and safely delete tracks
+- Read and set a track's color from a Live palette index or an RGB hex value. Live snaps RGB to the nearest palette color, and the tool reads the snapped color back.
 - Create Session View MIDI clips and write validated note content
 - Inspect scenes, clips, selection, devices, and every parameter Live exposes
 - Discover, resolve, and load VST3/VST2/AU plug-ins on an exact track through Live's Browser

@@ -11,6 +11,7 @@ import { AbletonClient } from "./ableton-client.js";
 import { PluginTools } from "./plugin-tools.js";
 import { OmnihostClient } from "./omnihost-client.js";
 import { OmnihostTools } from "./omnihost-tools.js";
+import { LIVE_PALETTE_MAX, LIVE_PALETTE_MIN } from "./track-color.js";
 import { fromProjectRoot } from "./paths.js";
 
 const { version } = JSON.parse(readFileSync(fromProjectRoot("package.json"), "utf8")) as { version: string };
@@ -45,6 +46,15 @@ server.tool("get_live_set", "Return a structured overview of the Live version, t
 server.tool("get_transport", "Read playback, position, tempo, metronome, recording, and loop state.", {}, async () => response(await live.getTransport()));
 server.tool("get_time_signature", "Read the current time signature.", {}, async () => response(await live.getTimeSignature()));
 server.tool("get_track", "Inspect a track by explicit current index.", { trackIndex: z.number().int().min(0) }, async ({ trackIndex }) => response(await live.getTrack(trackIndex)));
+server.tool("get_track_color", "Read a track's palette colorIndex and RGB. The RGB is the color Live is showing.", {
+  trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1).optional()
+}, async input => response(await live.getTrackColor(input)));
+server.tool("set_track_color", "Set a track color from a Live palette colorIndex (0-69) or an rgb hex color such as #FF5500. Live snaps RGB to the nearest palette color, so the read-back can differ from the hex you sent. Requires the track index and its current name.", {
+  trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1),
+  colorIndex: z.number().int().min(LIVE_PALETTE_MIN).max(LIVE_PALETTE_MAX).optional(),
+  rgb: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  dryRun: z.boolean().default(false)
+}, async input => response(await live.setTrackColor(input)));
 server.tool("list_scenes", "List Session View scenes with explicit indices.", {}, async () => response(await live.listScenes()));
 server.tool("list_clips", "List Session View clips, optionally restricted to one track.", { trackIndex: z.number().int().min(0).optional() }, async ({ trackIndex }) => response(await live.listClips(trackIndex)));
 server.tool("get_selected_track", "Return the selected regular track and explicit index.", {}, async () => response(await live.getSelectedTrack()));
