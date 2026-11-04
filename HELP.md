@@ -139,7 +139,7 @@ All tools follow the same contract: **exact targets** (mutations require indices
 - **list_clips** — List Session View clips, optionally restricted to one track.
 - **get_selected_track / get_selected_clip** — The current selection, refused politely when it isn't a regular track/clip.
 - **create_midi_clip** — Create a Session View MIDI clip with an exact beat length.
-- **add_midi_notes** — Validate and add MIDI notes to a Session View clip. Pitches accept integers or Ableton-style note names (`C3` is MIDI 60).
+- **add_midi_notes** — Validate and add MIDI notes to a Session View clip. Pitches accept integers or Ableton-style note names (`C3` is MIDI 60). Up to 10000 notes. The server splits the write into ordered batches that fit one UDP datagram, sends them to the same clip, and reads the clip back once. If a later batch fails, the error reports how many notes already landed.
 - **duplicate_track** — Duplicate a track with its devices and clips. The copy goes right after it.
 - **get_track_routing** — A track's current input and output routing, and the exact names Live offers for each.
 - **set_track** — Set a track's color, fold or unfold a group track, and set input and output routing by those exact names. An unknown routing name lists the choices and leaves the track unchanged. A channel is looked up after its new type is set, so if it is refused the type and every other change in the call are put back.
@@ -190,7 +190,7 @@ Live names an untitled track after the first clip or sample it gets (`3-Audio` b
 - **duplicate_clip** — Copy a Session clip into an empty slot on a track of the same type. An occupied slot or a MIDI-to-audio copy is refused.
 - **delete_clip** — Delete a Session clip; needs `confirm: true`.
 - **get_clip_notes** — The notes in a Session MIDI clip, each with the note id that `modify_clip_notes` needs.
-- **modify_clip_notes** — Change notes by id: pitch (number or name such as `E1`), start, duration, velocity, or mute. Fields you leave out stay as they are. Every change is read back.
+- **modify_clip_notes** — Change notes by id: pitch (number or name such as `E1`), start, duration, velocity, or mute. Fields you leave out stay as they are. Every change is read back. A large edit is split into batches that each fit one UDP datagram, so it can take more than one undo.
 - **remove_clip_notes** — Remove the notes whose start lies in a pitch and time range. The end of each range is exclusive. The result lists the removed note ids.
 
 Together with `add_midi_notes`, these give Session clips the same note editing as Arrangement clips.
@@ -214,8 +214,8 @@ Note times below are beats from the start of the clip. Clip `startBeats` is the 
 - **place_clip_in_arrangement** — Copy a Session clip into the Arrangement, tiled back to back from `startBeats` until `endBeats`, and confirm the copies. Each copy is the full clip, so the last one can run past `endBeats`. Ranges that would need more than 512 copies are refused.
 - **clear_arrangement_track** — Delete every Arrangement clip on one track. `confirm: true` is mandatory.
 - **get_arrangement_clip_notes** — Read every note in one Arrangement MIDI clip, including `noteId`, pitch, start, duration, velocity, and mute.
-- **add_arrangement_clip_notes** — Add notes, then read the clip back. The call fails if any requested note is missing or different. One note already in the clip can satisfy only one requested note. Pitches accept integers or note names (`C3` is MIDI 60). At most 256 notes per call.
-- **modify_arrangement_clip_notes** — Change existing notes by `noteId` (`Clip.apply_note_modifications`). The bridge edits the note vector `get_notes_extended` returns and passes that same vector back. A tuple does not match Live's signature. Omit a field to leave it alone. The clip is read back and each changed note must match.
+- **add_arrangement_clip_notes** — Add notes, then read the clip back once. The call fails if any requested note is missing or different. One note already in the clip can satisfy only one requested note. Pitches accept integers or note names (`C3` is MIDI 60). Up to 10000 notes per call. The server splits them into ordered batches of about 7 KB (and at most 256 notes, which is what the remote script accepts in one datagram) and sends those batches to the same clip. The response includes `chunks` and `chunkNoteCounts` plus one combined read-back. If a later batch fails, the error names how many notes already landed.
+- **modify_arrangement_clip_notes** — Change existing notes by `noteId` (`Clip.apply_note_modifications`). The bridge edits the note vector `get_notes_extended` returns and passes that same vector back. A tuple does not match Live's signature. Omit a field to leave it alone. The clip is read back once and each changed note must match. The same 10000-note cap and datagram batching apply.
 - **remove_arrangement_clip_notes** — Remove notes whose start lies in a pitch and time range (`Clip.remove_notes_extended`). `fromTime` is inclusive and `fromTime + timeSpan` is exclusive. `pitchSpan` counts pitches starting at `fromPitch`. The call fails when the range matches nothing. Notes outside the range must still be there afterward.
 
 ```json
