@@ -34,7 +34,7 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 
 - Status, transport, tempo, time signature, and song position with readback verification
 - List, create, rename, and safely delete tracks
-- Create Session View MIDI clips and write validated note content
+- Create Session View MIDI clips and write validated note content. Note writes larger than one UDP datagram are split into ordered batches and applied to the same clip.
 - Inspect scenes, clips, selection, devices, and every parameter Live exposes
 - Read and set mixer volume (dB), pan, sends, mute, and solo, plus master volume. Each write reads back the value Live stored and its display string.
 - Discover, resolve, and load VST3/VST2/AU plug-ins on an exact track through Live's Browser
@@ -45,7 +45,7 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 - List, add, rename, and delete Arrangement locators; adding or deleting one needs playback stopped and puts the playhead back afterwards
 - `list_arrangement_clips` lists a track's Arrangement clips with start, end, name, and whether each clip is MIDI or audio. You can still tile a Session clip into the Arrangement, and clear a track's Arrangement when you confirm it.
 - `create_arrangement_midi_clip` creates an empty MIDI clip in the Arrangement. It works with Live 12.1.10 or newer. You pass the track's index and its current name; if that name does not match, nothing is created, and the new clip is read back.
-- `get_arrangement_clip_notes`, `add_arrangement_clip_notes`, `modify_arrangement_clip_notes`, and `remove_arrangement_clip_notes` read, add, change, and remove notes on an Arrangement MIDI clip. The same track-name check applies, and every write is read back from Live.
+- `get_arrangement_clip_notes`, `add_arrangement_clip_notes`, `modify_arrangement_clip_notes`, and `remove_arrangement_clip_notes` read, add, change, and remove notes on an Arrangement MIDI clip. The same track-name check applies, and every write is read back from Live. Add and modify accept up to 10000 notes and send them as sequential batches that fit one datagram.
 - `load_user_library_item` loads a saved User Library item, such as an Instrument Rack that holds Pigments or Serum 2, by its exact name onto a track you name exactly. A preset file sitting on disk, such as a `.vstpreset`, is refused.
 
 ## Requirements

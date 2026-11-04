@@ -2,7 +2,7 @@ const CLIP_FIELDS = 4;
 const NOTE_FIELDS = 6;
 const NOTE_HEADER = 5;
 export const MAX_ARRANGEMENT_BEATS = 1_576_800;
-export const MAX_NOTES_PER_CALL = 256;
+export { MAX_NOTES_PER_CALL } from "./note-chunks.js";
 const TIME_TOLERANCE = 0.001;
 
 export interface ArrangementNote {
