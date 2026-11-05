@@ -6,6 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Hydrasynth Desktop Phase 1: `hydra_list_parameters`, `hydra_list_ports`, `hydra_apply_patch`, and `hydra_dump_current`. A description or a JSON patch is sent to the edit buffer as NRPN. "No pitch drift" forces the detune, analog feel, vibrato, Warm Mode, and oscillator-cent parameters off. `hydra_dump_current` requests one stored bank slot and writes a `.syx` file. It does not write a slot, and there is still no documented request for the unsaved edit buffer. SysEx behavior on firmware 2.2.0 is reported from Edisyn's 1.5.5/2.0.0 notes and is not confirmed on hardware here. Message bytes are covered by offline tests.
 - The local dashboard shows a quiet footer on every page with the version, “Built by Remy Mazmanian”, and a link to remymazmanian.com.
 - The MCP server, the local status service, and the dashboard footer read their version from the root `package.json`. A check fails if the remote script, the macOS wrapper, the dashboard package, or the documented bridge log line disagree with that version.
 

@@ -16,13 +16,14 @@ Everything about installing, using, troubleshooting, and understanding Ableton C
 8. [Connecting SI agents](#connecting-si-agents)
 9. [MCP tool reference](#mcp-tool-reference)
 10. [OmniHost](#omnihost)
-11. [The sample index](#the-sample-index)
-12. [Files and locations](#files-and-locations)
-13. [Troubleshooting](#troubleshooting)
-14. [Uninstalling](#uninstalling)
-15. [Security model](#security-model)
-16. [Known limitations](#known-limitations)
-17. [FAQ](#faq)
+11. [Hydrasynth Desktop](#hydrasynth-desktop)
+12. [The sample index](#the-sample-index)
+13. [Files and locations](#files-and-locations)
+14. [Troubleshooting](#troubleshooting)
+15. [Uninstalling](#uninstalling)
+16. [Security model](#security-model)
+17. [Known limitations](#known-limitations)
+18. [FAQ](#faq)
 
 ---
 
@@ -223,6 +224,19 @@ The recommended loading sequence: `plugin_loader_status` → `list_installed_plu
 - **refresh_omnihost_parameters** — Re-index the hosted plug-in's full VST3 parameter catalog.
 - **load_omnihost_on_track** — Load the installed OmniHost device on an exact existing MIDI track.
 
+### Hydrasynth Desktop
+
+- **hydra_list_parameters** — List the Phase 1 NRPN ids, ranges, init values, and the Edisyn sources those numbers come from.
+- **hydra_list_ports** — List USB MIDI outputs. Needs `npm install easymidi` on the Mac that has the Hydrasynth. Dry-run does not.
+- **hydra_apply_patch** — Start from the documented init baseline, overlay a description and a parameter object, and send NRPN. `dryRun: true` returns the bytes and does not touch the instrument. A description that says "no pitch drift" forces detune, analog feel, vibrato, Warm Mode, and oscillator cents off. This does not write a bank slot.
+- **hydra_dump_current** — Request one stored slot (`bank` A–H, `program` 1–128 as printed on the panel) and save the reply as `.syx`. This is not an edit-buffer dump. Save on the panel first if you need the unsaved buffer.
+
+```json
+{ "tool": "hydra_apply_patch", "arguments": { "description": "warm soft pad, no pitch drift", "dryRun": true } }
+```
+
+The setup, the MIDI-page NRPN switch, the backup warning, and what is still unknown on firmware 2.2.0 are in the README section [Hydrasynth Desktop](README.md#hydrasynth-desktop).
+
 ### Samples
 
 - **search_samples** — Search the local SQLite sample index by keywords, folder, sample type, BPM range, musical key, duration, one-shot/loop kind, favorites, and tags.
@@ -254,6 +268,14 @@ Details worth knowing:
 - One active OmniHost instance is supported (the device owns its port).
 - Parameters the vendor does not publish through VST3 remain inaccessible.
 
+## Hydrasynth Desktop
+
+Control Deck can send a small set of ASM Hydrasynth Desktop parameters over USB MIDI and can request one stored patch as SysEx. The instrument has to be set to Param TX/RX = NRPN, and `config/hydrasynth.json` holds the port name and MIDI channel. See the [README](README.md#hydrasynth-desktop) for the backup warning, the init baseline, the "warm soft pad, no pitch drift" dry-run, and the firmware 2.2.0 limits.
+
+Phase 1 stops at the edit buffer. Saving is the front-panel Save button. Bank-slot SysEx write is not implemented. `hydra_dump_current` reads a slot that is already stored. Edisyn's encoding notes cover firmware 1.5.5 and 2.0.0. The later patch-format note says 2.2.0 is believed to match 2.0.0, with version byte `0xDC`. A dump reports that byte and any mismatch. It does not claim the 2.2.0 Desktop was checked from this repository.
+
+Unmapped parameters stay where the current preset left them. Select Init on the panel before applying if the previous patch used mutants, the mod matrix, or the arp.
+
 ## The sample index
 
 The sample tools read a local SQLite catalog of an external sample drive. Point `config/sample-library.json` at your drive (setup creates the file from the example on first run):
@@ -284,6 +306,8 @@ WAV, AIFF/AIF, MP3, and FLAC files are cataloged. Source audio is read-only — 
 | Per-install secret | `<install>/data/bridge-token` |
 | Plug-in inventory | `<install>/data/plugin-index.json` |
 | Sample index | `<install>/data/samples.sqlite` |
+| Hydrasynth MIDI config | `<install>/config/hydrasynth.json` (copied from the example by setup) |
+| Hydrasynth SysEx dumps | `<install>/data/hydrasynth/*.syx` |
 | MCP request log | `<install>/logs/control-deck.jsonl` |
 | Remote script (installed copy) | `~/Music/Ableton/User Library/Remote Scripts/Control_Deck/` |
 | OmniHost device (installed copy) | `~/Music/Ableton/User Library/Presets/Instruments/Max Instrument/Control Deck/` |
@@ -314,6 +338,8 @@ Ports (all loopback-only): `50711/udp` bridge, `50712/tcp` status API, `50713/tc
 **Plug-in list is empty or stale.** Use the reindex button on the deck, or `npm run index:plugins`.
 
 **Sample tools error about the library config.** Edit `config/sample-library.json` so `root` points at your actual sample drive (it must be under `/Volumes/`), then `npm run samples:index`.
+
+**Hydrasynth apply says the MIDI package is missing, or the port list is empty.** Live send and `hydra_list_ports` need `npm install easymidi` on the Mac the Hydrasynth is plugged into. Dry-run does not. Set Param TX and Param RX to NRPN on the instrument, and set `portName` in `config/hydrasynth.json` to a name `hydra_list_ports` printed. An empty list with easymidi installed means the USB device is not on that Mac.
 
 **An agent connects but tools time out.** Live must be open with the Control Surface enabled; requests need a live bridge. `ableton_status` is the cheapest way to check what the agent sees.
 
@@ -350,6 +376,7 @@ Then delete the install folder, remove the wrapper app from `/Applications` if y
 - **Preset files on disk are not loaded.** `.vstpreset`, `.aupreset`, `.fxp`, and `.fxb` paths are refused. Use a User Library `.adg` or `.adv`, selected by exact name.
 - **No audio preview.** The API does not preview samples, and Control Deck does not automate the UI to do it.
 - **Live API coupling.** The bridge uses Live's Python remote-script API, so a future Live update could require a compatible Control Deck release.
+- **Hydrasynth Phase 1 does not store patches.** NRPN changes the edit buffer. The front panel saves it. SysEx dump reads one bank slot and does not write one. There is no documented request for the unsaved edit buffer. Firmware 2.2.0 SysEx is accepted defensively from Edisyn's 1.5.5/2.0.0 notes and has not been confirmed on hardware here. Parameters outside the Phase 1 list are left as they are.
 
 ## FAQ
 

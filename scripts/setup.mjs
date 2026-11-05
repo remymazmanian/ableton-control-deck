@@ -30,6 +30,8 @@ const remoteScriptSource = path.join(root, "remote-script", "Control_Deck");
 const remoteScriptTargetDirectory = path.join(home, "Music", "Ableton", "User Library", "Remote Scripts", "Control_Deck");
 const sampleLibraryConfig = path.join(root, "config", "sample-library.json");
 const sampleLibraryExample = path.join(root, "config", "sample-library.example.json");
+const hydrasynthConfig = path.join(root, "config", "hydrasynth.json");
+const hydrasynthExample = path.join(root, "config", "hydrasynth.example.json");
 const agentsDirectory = path.join(home, "Library", "LaunchAgents");
 const nodePath = process.execPath;
 
@@ -137,6 +139,13 @@ if (!existsSync(sampleLibraryConfig) && existsSync(sampleLibraryExample)) {
   ok("Created config/sample-library.json (edit it to point at your sample drive before indexing)");
 } else if (existsSync(sampleLibraryConfig)) {
   ok("Sample library config already present");
+}
+
+if (!existsSync(hydrasynthConfig) && existsSync(hydrasynthExample)) {
+  await copyFile(hydrasynthExample, hydrasynthConfig);
+  ok("Created config/hydrasynth.json (set portName to the Hydrasynth USB MIDI port before sending a patch)");
+} else if (existsSync(hydrasynthConfig)) {
+  ok("Hydrasynth MIDI config already present");
 }
 
 // ------------------------------------------------------------ remote script

@@ -7,6 +7,7 @@ max-for-live/build/
 dashboard/node_modules/
 dashboard/.next/
 config/sample-library.json
+config/hydrasynth.json
 *.log
 .env
 .DS_Store

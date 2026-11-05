@@ -11,6 +11,7 @@ import { AbletonClient } from "./ableton-client.js";
 import { PluginTools } from "./plugin-tools.js";
 import { OmnihostClient } from "./omnihost-client.js";
 import { OmnihostTools } from "./omnihost-tools.js";
+import { HydrasynthTools } from "./hydrasynth/tools.js";
 import { fromProjectRoot } from "./paths.js";
 
 const { version } = JSON.parse(readFileSync(fromProjectRoot("package.json"), "utf8")) as { version: string };
@@ -23,6 +24,7 @@ const local = new LocalCapabilities();
 const plugins = new PluginTools(ableton, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
 const omnihostClient = new OmnihostClient();
 const omnihost = new OmnihostTools(omnihostClient, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
+const hydra = new HydrasynthTools({ defaultDryRun: process.env.CONTROL_DECK_DRY_RUN === "1" });
 const server = new McpServer({ name: "ableton-control-deck", version });
 const response = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }], structuredContent: value as Record<string, unknown> });
 
@@ -82,6 +84,27 @@ server.tool("refresh_omnihost_parameters", "Re-index Mini V4's full VST3 paramet
 server.tool("load_omnihost_on_track", "Load the installed Control Deck OmniHost device on an exact existing MIDI track.", {
   trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), dryRun: z.boolean().default(false)
 }, async input => response(await omnihost.loadOnTrack(input)));
+
+server.tool("hydra_list_parameters", "List the Phase 1 Hydrasynth NRPN parameters, their ranges, init values, and the sources those numbers come from.", {
+  group: z.enum(["oscillator", "mixer", "mutant", "filter", "amp", "envelope", "lfo", "effect", "voice"]).optional()
+}, async ({ group }) => response(await hydra.listParameters({ group })));
+server.tool("hydra_list_ports", "List USB MIDI output ports. Needs the optional easymidi package on the Mac attached to the Hydrasynth.", {}, async () => response(await hydra.listPorts()));
+server.tool("hydra_apply_patch", "Start from the Hydrasynth init baseline, overlay a plain-language description and parameter JSON, and send the result as NRPN. A description that says \"no pitch drift\" forces detune, analog feel, vibrato, warm mode, and oscillator cents off. Dry-run builds the bytes and does not need the instrument. This does not write a bank slot.", {
+  description: z.string().optional(),
+  parameters: z.record(z.string(), z.number().int()).optional(),
+  pitchDrift: z.boolean().optional(),
+  dryRun: z.boolean().default(false),
+  portName: z.string().optional(),
+  channel: z.number().int().min(1).max(16).optional()
+}, async input => response(await hydra.applyPatch(input)));
+server.tool("hydra_dump_current", "Request one stored Hydrasynth bank slot over SysEx and save the reply as .syx. Program is the panel number, 1-128. This reads a slot, not the unsaved edit buffer, and it does not write a slot. Dry-run returns the request bytes.", {
+  bank: z.union([z.number().int().min(0).max(7), z.string().regex(/^[A-Ha-h]$/)]),
+  program: z.number().int().min(1).max(128),
+  outputPath: z.string().optional(),
+  dryRun: z.boolean().default(false),
+  portName: z.string().optional(),
+  timeoutMs: z.number().int().min(100).max(10000).optional()
+}, async input => response(await hydra.dumpCurrent(input)));
 
 server.tool("play", "Start Live playback and verify the transport state.", { dryRun: z.boolean().default(false) }, async ({ dryRun }) => response(await live.play(dryRun)));
 server.tool("stop", "Stop Live playback and verify the transport state.", { dryRun: z.boolean().default(false) }, async ({ dryRun }) => response(await live.stop(dryRun)));
