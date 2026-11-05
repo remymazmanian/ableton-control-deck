@@ -11,6 +11,31 @@ describe("Live-control construction and errors", () => {
     ]);
     expect(result.ok).toBe(true);
   });
+  it("splits a long Session note write and reports a partial landing", async () => {
+    const notes = Array.from({ length: 400 }, (_, index) => ({ pitch: 60, startTime: index * 0.25, duration: 0.25, velocity: 100 }));
+    const fake = {
+      send: vi.fn(async (_address: string, args: unknown[]) => {
+        if (fake.send.mock.calls.length > 1) throw new Error("send EMSGSIZE");
+        void args;
+      }),
+      query: vi.fn().mockResolvedValue({ address: "/live/clip/get/notes", args: [] })
+    };
+    const failed = await new AbletonCommands(fake as never, { write: vi.fn() } as never).addMidiNotes(0, 0, notes);
+    expect(failed.ok).toBe(false);
+    expect(failed.error?.message).toMatch(/notes landed/);
+    expect(failed.error?.details).toMatchObject({ phase: "send", notesRequested: 400, chunksCompleted: 1 });
+    expect((failed.error?.details as { notesLanded: number }).notesLanded).toBeGreaterThan(0);
+    expect((failed.error?.details as { notesLanded: number }).notesLanded).toBeLessThan(400);
+
+    const okFake = { send: vi.fn(), query: vi.fn().mockResolvedValue({ address: "/live/clip/get/notes", args: [0, 0] }) };
+    const result = await new AbletonCommands(okFake as never, { write: vi.fn() } as never).addMidiNotes(0, 0, notes);
+    expect(result.ok).toBe(true);
+    expect(okFake.send.mock.calls.length).toBeGreaterThan(1);
+    const pitches = okFake.send.mock.calls.flatMap(call => (call[1] as Array<{ value?: number } | boolean>).filter((_value, index) => index >= 2 && (index - 2) % 5 === 0).map(value => (value as { value: number }).value));
+    expect(pitches).toEqual(notes.map(() => 60));
+    expect(okFake.query).toHaveBeenCalledTimes(1);
+  });
+
   it("returns structured failures", async () => {
     const fake = { send: vi.fn().mockRejectedValue(new Error("offline")), query: vi.fn().mockResolvedValue({ args: [] }) };
     const result = await new AbletonCommands(fake as never, { write: vi.fn() } as never).createMidiTrack(-1);

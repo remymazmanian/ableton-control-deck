@@ -11,6 +11,7 @@ import { AbletonClient } from "./ableton-client.js";
 import { PluginTools } from "./plugin-tools.js";
 import { OmnihostClient } from "./omnihost-client.js";
 import { OmnihostTools } from "./omnihost-tools.js";
+import { MAX_NOTES_PER_CALL } from "./note-chunks.js";
 import { fromProjectRoot } from "./paths.js";
 
 const { version } = JSON.parse(readFileSync(fromProjectRoot("package.json"), "utf8")) as { version: string };
@@ -34,9 +35,9 @@ server.tool("create_midi_track", "Create a MIDI track at index (-1 appends).", {
 server.tool("create_audio_track", "Create an audio track at index (-1 appends).", { index: z.number().int().min(-1).default(-1), dryRun: z.boolean().default(false) }, async ({ index, dryRun }) => response(await commands.createAudioTrack(index, dryRun)));
 server.tool("rename_track", "Rename a track selected by explicit index.", { trackIndex: z.number().int().min(0), name: z.string().min(1), dryRun: z.boolean().default(false) }, async ({ trackIndex, name, dryRun }) => response(await commands.renameTrack(trackIndex, name, dryRun)));
 server.tool("create_midi_clip", "Create a Session View MIDI clip.", { trackIndex: z.number().int().min(0), sceneIndex: z.number().int().min(0), lengthBeats: z.number().positive(), dryRun: z.boolean().default(false) }, async ({ trackIndex, sceneIndex, lengthBeats, dryRun }) => response(await commands.createMidiClip(trackIndex, sceneIndex, lengthBeats, dryRun)));
-server.tool("add_midi_notes", "Validate and add MIDI notes to a Session View clip. Ableton note names use C3=60.", {
+server.tool("add_midi_notes", "Validate and add MIDI notes to a Session View clip. Ableton note names use C3=60. Up to 10000 notes; the write is split into datagram-sized batches and read back once.", {
   trackIndex: z.number().int().min(0), sceneIndex: z.number().int().min(0),
-  notes: z.array(z.object({ pitch: z.union([z.number().int(), z.string()]), startTime: z.number(), duration: z.number(), velocity: z.number().int(), mute: z.boolean().default(false) })).min(1),
+  notes: z.array(z.object({ pitch: z.union([z.number().int(), z.string()]), startTime: z.number(), duration: z.number(), velocity: z.number().int(), mute: z.boolean().default(false) })).min(1).max(MAX_NOTES_PER_CALL),
   dryRun: z.boolean().default(false)
 }, async ({ trackIndex, sceneIndex, notes, dryRun }) => response(await commands.addMidiNotes(trackIndex, sceneIndex, notes, dryRun)));
 server.tool("delete_track", "Delete a track by explicit index. confirm=true is mandatory except in dry-run mode.", { trackIndex: z.number().int().min(0), confirm: z.boolean().default(false), dryRun: z.boolean().default(false) }, async ({ trackIndex, confirm, dryRun }) => response(await commands.deleteTrack(trackIndex, confirm, dryRun)));
@@ -49,6 +50,27 @@ server.tool("list_scenes", "List Session View scenes with explicit indices.", {}
 server.tool("list_clips", "List Session View clips, optionally restricted to one track.", { trackIndex: z.number().int().min(0).optional() }, async ({ trackIndex }) => response(await live.listClips(trackIndex)));
 server.tool("get_selected_track", "Return the selected regular track and explicit index.", {}, async () => response(await live.getSelectedTrack()));
 server.tool("get_selected_clip", "Return the selected track/scene position and whether it contains a clip.", {}, async () => response(await live.getSelectedClip()));
+server.tool("get_mixer", "Read master volume and, when a track index and current name are given, that track's volume, pan, mute, solo, and sends. Volume read-back includes Live's display string.", {
+  trackIndex: z.number().int().min(0).optional(), expectedTrackName: z.string().min(1).optional()
+}, async input => response(await live.getMixer(input)));
+server.tool("set_track_volume", "Set a track's mixer volume in dB and read back the normalized value plus the display string Live shows. Accepted range is -70 dB (silence) through +6 dB.", {
+  trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), db: z.number().min(-70).max(6), dryRun: z.boolean().default(false)
+}, async input => response(await live.setTrackVolume(input)));
+server.tool("set_track_pan", "Set a track's pan from -1 (left) through 0 (center) to 1 (right) and read back Live's value and display string.", {
+  trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), pan: z.number().min(-1).max(1), dryRun: z.boolean().default(false)
+}, async input => response(await live.setTrackPan(input)));
+server.tool("set_track_send", "Set one send by index or by its name (the send parameter name or the return track name). level is normalized, usually 0 (silence) to 1 (unity, 0 dB). The level Live stored and its display string are read back.", {
+  trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), sendIndex: z.number().int().min(0).optional(), sendName: z.string().min(1).optional(), level: z.number(), dryRun: z.boolean().default(false)
+}, async input => response(await live.setTrackSend(input)));
+server.tool("set_track_mute", "Mute or unmute a track and read the mute state back.", {
+  trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), mute: z.boolean(), dryRun: z.boolean().default(false)
+}, async input => response(await live.setTrackMute(input)));
+server.tool("set_track_solo", "Solo or unsolo a track and read the solo state back.", {
+  trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), solo: z.boolean(), dryRun: z.boolean().default(false)
+}, async input => response(await live.setTrackSolo(input)));
+server.tool("set_master_volume", "Set the master track volume in dB and read back the normalized value plus the display string Live shows. Same -70 dB to +6 dB range as track volume.", {
+  db: z.number().min(-70).max(6), dryRun: z.boolean().default(false)
+}, async input => response(await live.setMasterVolume(input)));
 server.tool("list_devices", "List top-level devices on a track.", { trackIndex: z.number().int().min(0) }, async ({ trackIndex }) => response(await live.listDevices(trackIndex)));
 server.tool("get_device_parameters", "List parameters exposed by Ableton for a specific device.", { trackIndex: z.number().int().min(0), deviceIndex: z.number().int().min(0) }, async ({ trackIndex, deviceIndex }) => response(await live.getDeviceParameters(trackIndex, deviceIndex)));
 server.tool("list_device_parameters", "Alias of get_device_parameters.", { trackIndex: z.number().int().min(0), deviceIndex: z.number().int().min(0) }, async ({ trackIndex, deviceIndex }) => response(await live.getDeviceParameters(trackIndex, deviceIndex)));
@@ -101,14 +123,14 @@ server.tool("create_arrangement_midi_clip", "Create an empty Arrangement MIDI cl
 }, async input => response(await live.createArrangementMidiClip(input)));
 const arrangementClipTarget = { trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), clipIndex: z.number().int().min(0).optional(), startBeats: z.number().min(0).optional() };
 server.tool("get_arrangement_clip_notes", "Read notes in one Arrangement MIDI clip, addressed by track plus clip index or start time. Note times are beats from the start of the clip.", arrangementClipTarget, async input => response(await live.getArrangementClipNotes(input)));
-server.tool("add_arrangement_clip_notes", "Add MIDI notes to an Arrangement MIDI clip and read them back. A requested note that is missing or different fails the call. Note times are beats from the start of the clip.", {
+server.tool("add_arrangement_clip_notes", "Add MIDI notes to an Arrangement MIDI clip and read them back once. A requested note that is missing or different fails the call. Note times are beats from the start of the clip. Up to 10000 notes, sent as datagram-sized batches.", {
   ...arrangementClipTarget,
-  notes: z.array(z.object({ pitch: z.union([z.number().int(), z.string()]), startTime: z.number(), duration: z.number(), velocity: z.number().int(), mute: z.boolean().default(false) })).min(1),
+  notes: z.array(z.object({ pitch: z.union([z.number().int(), z.string()]), startTime: z.number(), duration: z.number(), velocity: z.number().int(), mute: z.boolean().default(false) })).min(1).max(MAX_NOTES_PER_CALL),
   dryRun: z.boolean().default(false)
 }, async input => response(await live.addArrangementClipNotes(input)));
-server.tool("modify_arrangement_clip_notes", "Change existing Arrangement MIDI notes by note id from get_arrangement_clip_notes, then read them back. Unspecified fields stay as they are.", {
+server.tool("modify_arrangement_clip_notes", "Change existing Arrangement MIDI notes by note id from get_arrangement_clip_notes, then read them back once. Unspecified fields stay as they are. Up to 10000 notes, sent as datagram-sized batches.", {
   ...arrangementClipTarget,
-  notes: z.array(z.object({ noteId: z.number().int().min(0), pitch: z.union([z.number().int(), z.string()]).optional(), startTime: z.number().min(0).optional(), duration: z.number().positive().optional(), velocity: z.number().int().min(1).max(127).optional(), mute: z.boolean().optional() })).min(1),
+  notes: z.array(z.object({ noteId: z.number().int().min(0), pitch: z.union([z.number().int(), z.string()]).optional(), startTime: z.number().min(0).optional(), duration: z.number().positive().optional(), velocity: z.number().int().min(1).max(127).optional(), mute: z.boolean().optional() })).min(1).max(MAX_NOTES_PER_CALL),
   dryRun: z.boolean().default(false)
 }, async input => response(await live.modifyArrangementClipNotes(input)));
 server.tool("remove_arrangement_clip_notes", "Remove Arrangement MIDI notes whose start lies in a pitch and time range, using Clip.remove_notes_extended, then read the clip back. Times are beats from the start of the clip. The end of the time range is exclusive.", {
