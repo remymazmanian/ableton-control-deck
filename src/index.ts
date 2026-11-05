@@ -50,6 +50,27 @@ server.tool("list_scenes", "List Session View scenes with explicit indices.", {}
 server.tool("list_clips", "List Session View clips, optionally restricted to one track.", { trackIndex: z.number().int().min(0).optional() }, async ({ trackIndex }) => response(await live.listClips(trackIndex)));
 server.tool("get_selected_track", "Return the selected regular track and explicit index.", {}, async () => response(await live.getSelectedTrack()));
 server.tool("get_selected_clip", "Return the selected track/scene position and whether it contains a clip.", {}, async () => response(await live.getSelectedClip()));
+server.tool("get_mixer", "Read master volume and, when a track index and current name are given, that track's volume, pan, mute, solo, and sends. Volume read-back includes Live's display string.", {
+  trackIndex: z.number().int().min(0).optional(), expectedTrackName: z.string().min(1).optional()
+}, async input => response(await live.getMixer(input)));
+server.tool("set_track_volume", "Set a track's mixer volume in dB and read back the normalized value plus the display string Live shows. Accepted range is -70 dB (silence) through +6 dB.", {
+  trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), db: z.number().min(-70).max(6), dryRun: z.boolean().default(false)
+}, async input => response(await live.setTrackVolume(input)));
+server.tool("set_track_pan", "Set a track's pan from -1 (left) through 0 (center) to 1 (right) and read back Live's value and display string.", {
+  trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), pan: z.number().min(-1).max(1), dryRun: z.boolean().default(false)
+}, async input => response(await live.setTrackPan(input)));
+server.tool("set_track_send", "Set one send by index or by its name (the send parameter name or the return track name). level is normalized, usually 0 (silence) to 1 (unity, 0 dB). The level Live stored and its display string are read back.", {
+  trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), sendIndex: z.number().int().min(0).optional(), sendName: z.string().min(1).optional(), level: z.number(), dryRun: z.boolean().default(false)
+}, async input => response(await live.setTrackSend(input)));
+server.tool("set_track_mute", "Mute or unmute a track and read the mute state back.", {
+  trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), mute: z.boolean(), dryRun: z.boolean().default(false)
+}, async input => response(await live.setTrackMute(input)));
+server.tool("set_track_solo", "Solo or unsolo a track and read the solo state back.", {
+  trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), solo: z.boolean(), dryRun: z.boolean().default(false)
+}, async input => response(await live.setTrackSolo(input)));
+server.tool("set_master_volume", "Set the master track volume in dB and read back the normalized value plus the display string Live shows. Same -70 dB to +6 dB range as track volume.", {
+  db: z.number().min(-70).max(6), dryRun: z.boolean().default(false)
+}, async input => response(await live.setMasterVolume(input)));
 server.tool("list_devices", "List top-level devices on a track.", { trackIndex: z.number().int().min(0) }, async ({ trackIndex }) => response(await live.listDevices(trackIndex)));
 server.tool("get_device_parameters", "List parameters exposed by Ableton for a specific device.", { trackIndex: z.number().int().min(0), deviceIndex: z.number().int().min(0) }, async ({ trackIndex, deviceIndex }) => response(await live.getDeviceParameters(trackIndex, deviceIndex)));
 server.tool("list_device_parameters", "Alias of get_device_parameters.", { trackIndex: z.number().int().min(0), deviceIndex: z.number().int().min(0) }, async ({ trackIndex, deviceIndex }) => response(await live.getDeviceParameters(trackIndex, deviceIndex)));

@@ -152,7 +152,11 @@ class Track(object):
         self.is_foldable = False
         self.is_grouped = False
         self.playing_slot_index = -1
-        self.mixer_device = types.SimpleNamespace(volume=Parameter("Volume", 0.85), panning=Parameter("Pan", 0.0, -1.0, 1.0))
+        self.mixer_device = types.SimpleNamespace(
+            volume=Parameter("Volume", 0.85),
+            panning=Parameter("Pan", 0.0, -1.0, 1.0),
+            sends=[Parameter("A-Return", 0.0), Parameter("B-Return", 1.0)],
+        )
         self.clip_slots = [Slot()]
         self.devices = [Device()]
         self.arrangement_clips = []
@@ -184,6 +188,8 @@ class Track(object):
 class Song(object):
     def __init__(self):
         self.tracks = [Track("Synth")]
+        self.return_tracks = [types.SimpleNamespace(name="Delay"), types.SimpleNamespace(name="Reverb")]
+        self.master_track = Track("Master")
         self.scenes = [types.SimpleNamespace(name="Scene 1")]
         self.view = types.SimpleNamespace(selected_track=self.tracks[0], selected_scene=self.scenes[0])
         self.tempo = 124.0
@@ -220,6 +226,46 @@ class ControlDeckLiveTests(unittest.TestCase):
         self.assertEqual(tracks["args"], ["Synth"])
         params = self.bridge._live_query({"address": "/live/device/get/parameters/value_string", "args": [0, 0]})
         self.assertEqual(params["args"], [0, 0, "1.00", "0.50"])
+
+    def test_reads_and_sets_mixer_volume_pan_sends_mute_solo_and_master(self):
+        track = self.song.tracks[0]
+        track.mixer_device.volume.str_for_value = lambda value: "%.2f dB" % value
+        listed = self.bridge._live_query({"address": "/live/track/get/mixer", "args": [0]})
+        self.assertEqual(listed["args"][:7], [0, 0.85, "0.85 dB", 0.0, "0.00", False, False])
+        self.assertEqual(listed["args"][7:14], [0, "A-Return", "Delay", 0.0, 0.0, 1.0, "0.00"])
+
+        self.bridge._live_command({"address": "/live/track/set/volume", "args": [0, "Synth", 0.7]})
+        self.bridge._live_command({"address": "/live/track/set/panning", "args": [0, "Synth", -0.5]})
+        self.bridge._live_command({"address": "/live/track/set/send", "args": [0, "Synth", 0, "Delay", 0.25]})
+        self.bridge._live_command({"address": "/live/track/set/mute", "args": [0, "Synth", True]})
+        self.bridge._live_command({"address": "/live/track/set/solo", "args": [0, "Synth", True]})
+        self.bridge._live_command({"address": "/live/song/set/master_volume", "args": [0.5]})
+
+        updated = self.bridge._live_query({"address": "/live/track/get/mixer", "args": [0]})
+        self.assertEqual(updated["args"][1:7], [0.7, "0.70 dB", -0.5, "-0.50", True, True])
+        self.assertEqual(updated["args"][10], 0.25)
+        master = self.bridge._live_query({"address": "/live/song/get/master_volume", "args": []})
+        self.assertEqual(master["args"][0], 0.5)
+
+        with self.assertRaises(Exception) as mismatch:
+            self.bridge._live_command({"address": "/live/track/set/volume", "args": [0, "Bass", 0.2]})
+        self.assertIn("Bass", str(mismatch.exception))
+        self.assertEqual(track.mixer_device.volume.value, 0.7)
+
+        with self.assertRaises(Exception) as pan:
+            self.bridge._live_command({"address": "/live/track/set/panning", "args": [0, "Synth", 2]})
+        self.assertIn("Pan", str(pan.exception))
+        self.assertEqual(track.mixer_device.panning.value, -0.5)
+
+        with self.assertRaises(Exception) as send:
+            self.bridge._live_command({"address": "/live/track/set/send", "args": [0, "Synth", 0, "Nope", 0.5]})
+        self.assertIn("Nope", str(send.exception))
+        self.assertEqual(track.mixer_device.sends[0].value, 0.25)
+
+        with self.assertRaises(Exception) as master_range:
+            self.bridge._live_command({"address": "/live/song/set/master_volume", "args": [1.5]})
+        self.assertIn("Master volume", str(master_range.exception))
+        self.assertEqual(self.song.master_track.mixer_device.volume.value, 0.5)
 
     def test_mutates_only_allowlisted_operations(self):
         self.bridge._live_command({"address": "/live/song/set/tempo", "args": [130.0]})

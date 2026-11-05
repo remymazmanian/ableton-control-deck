@@ -201,6 +201,9 @@ class ControlDeckBridge(ControlSurface):
             values = [track.name for track in song.tracks]
         elif address == "/live/song/get/scenes/name":
             values = [scene.name for scene in song.scenes]
+        elif address == "/live/song/get/master_volume":
+            parameter = self._master_track().mixer_device.volume
+            values = [float(parameter.value), parameter.str_for_value(parameter.value)]
         elif address.startswith("/live/song/get/"):
             prop = address.rsplit("/", 1)[-1]
             allowed = {
@@ -218,6 +221,8 @@ class ControlDeckBridge(ControlSurface):
                 values = [track_index, self._json_value(getattr(track, prop))]
             elif prop in {"volume", "panning"}:
                 values = [track_index, self._json_value(getattr(track.mixer_device, prop).value)]
+            elif prop == "mixer":
+                values = self._mixer_values(track_index, track)
             elif prop == "clips/name":
                 values = [track_index] + [slot.clip.name if slot.clip else None for slot in track.clip_slots]
             elif prop == "clips/length":
@@ -299,6 +304,9 @@ class ControlDeckBridge(ControlSurface):
             self._require_args(args, 1, address)
             track_index, _track = self._track(args)
             song.delete_track(track_index)
+        elif address == "/live/song/set/master_volume":
+            self._require_args(args, 1, address)
+            self._set_ranged_parameter(self._master_track().mixer_device.volume, args[0], "Master volume")
         elif address.startswith("/live/song/set/"):
             self._require_args(args, 1, address)
             prop = address.rsplit("/", 1)[-1]
@@ -306,6 +314,16 @@ class ControlDeckBridge(ControlSurface):
             if prop not in allowed:
                 raise BridgeError("ADDRESS_NOT_ALLOWED", "Unsupported song mutation: %s" % address)
             setattr(song, prop, args[0])
+        elif address == "/live/track/set/volume":
+            self._set_named_mixer_parameter(args, "volume", "Volume")
+        elif address == "/live/track/set/panning":
+            self._set_named_mixer_parameter(args, "panning", "Pan")
+        elif address == "/live/track/set/send":
+            self._set_send(args)
+        elif address == "/live/track/set/mute":
+            self._set_track_bool(args, "mute")
+        elif address == "/live/track/set/solo":
+            self._set_track_bool(args, "solo")
         elif address == "/live/track/set/name":
             self._require_args(args, 2, address)
             _track_index, track = self._track(args)
@@ -511,6 +529,67 @@ class ControlDeckBridge(ControlSurface):
             clip = matches[0]
         if name:
             clip.name = name
+
+    def _master_track(self):
+        master = getattr(self.song(), "master_track", None)
+        if master is None:
+            raise BridgeError("MASTER_NOT_FOUND", "This Live set has no master track")
+        return master
+
+    def _mixer_values(self, track_index, track):
+        volume = track.mixer_device.volume
+        pan = track.mixer_device.panning
+        values = [
+            track_index,
+            float(volume.value), volume.str_for_value(volume.value),
+            float(pan.value), pan.str_for_value(pan.value),
+            bool(track.mute), bool(track.solo),
+        ]
+        sends = list(getattr(track.mixer_device, "sends", []) or [])
+        returns = list(getattr(self.song(), "return_tracks", []) or [])
+        for index, send in enumerate(sends):
+            return_name = returns[index].name if index < len(returns) else ""
+            values.extend([
+                index, send.name, return_name, float(send.value), float(send.min), float(send.max), send.str_for_value(send.value),
+            ])
+        return values
+
+    def _set_named_mixer_parameter(self, args, prop, label):
+        self._require_args(args, 3, "/live/track/set/%s" % prop)
+        _track_index, track = self._named_track(args)
+        self._set_ranged_parameter(getattr(track.mixer_device, prop), args[2], label)
+
+    def _set_send(self, args):
+        self._require_args(args, 5, "/live/track/set/send")
+        _track_index, track = self._named_track(args)
+        send_index = self._non_negative_index(args[2], "Send index")
+        expected = str(args[3])
+        sends = list(getattr(track.mixer_device, "sends", []) or [])
+        if send_index >= len(sends):
+            raise BridgeError("INVALID_SEND", "Send index %d does not exist" % send_index)
+        send = sends[send_index]
+        returns = list(getattr(self.song(), "return_tracks", []) or [])
+        return_name = returns[send_index].name if send_index < len(returns) else ""
+        if expected != send.name and expected != return_name:
+            raise BridgeError("SEND_IDENTITY_MISMATCH", "Expected send '%s', found '%s'" % (expected, send.name))
+        self._set_ranged_parameter(send, args[4], "Send level")
+
+    def _set_track_bool(self, args, prop):
+        self._require_args(args, 3, "/live/track/set/%s" % prop)
+        _track_index, track = self._named_track(args)
+        if not isinstance(args[2], bool):
+            raise BridgeError("INVALID_ARGUMENTS", "%s must be a boolean" % prop)
+        setattr(track, prop, args[2])
+
+    def _set_ranged_parameter(self, parameter, value, label):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise BridgeError("INVALID_ARGUMENTS", "%s must be a number" % label)
+        number = self._finite_float(value, label)
+        low = float(parameter.min)
+        high = float(parameter.max)
+        if number < low - 1e-6 or number > high + 1e-6:
+            raise BridgeError("INVALID_RANGE", "%s must be from %s to %s" % (label, low, high))
+        parameter.value = number
 
     def _named_track(self, args):
         track_index, track = self._track(args)
