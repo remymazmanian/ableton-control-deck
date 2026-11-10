@@ -15,7 +15,7 @@ from .session_ops import SESSION_COMMANDS, SESSION_QUERIES, SessionOps
 
 
 SCRIPT_NAME = "Control Deck Bridge"
-SCRIPT_VERSION = "1.3.0"
+SCRIPT_VERSION = "1.4.0"
 PROTOCOL = "ableton-control-deck/1"
 HOST = "127.0.0.1"
 PORT = 50711
