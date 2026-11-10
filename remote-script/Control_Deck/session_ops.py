@@ -40,6 +40,7 @@ SESSION_QUERIES = (
     "/live/song/get/api_features",
     "/live/device/get/sample",
     "/live/devices/get/state",
+    "/live/view/get/selection",
 )
 SESSION_COMMANDS = (
     "/live/mixer/set",
@@ -67,12 +68,14 @@ SESSION_COMMANDS = (
     "/live/device/replace_sample",
     "/live/device/set_enabled",
     "/live/device/delete",
+    "/live/view/select",
 )
 # Undo and redo move through Live's history, so they must not open a step of their own.
 # Same limit as Control_Deck.MAX_ARRANGEMENT_BEATS (importing it here would be circular).
 MAX_ARRANGEMENT_BEATS = 1576800.0
 SAMPLE_EXTENSIONS = (".wav", ".aif", ".aiff", ".mp3", ".flac")
-NO_UNDO_STEP = ("/live/song/undo", "/live/song/redo")
+# Selecting changes Live's view, not the set, so it is not an undoable step either.
+NO_UNDO_STEP = ("/live/song/undo", "/live/song/redo", "/live/view/select")
 
 
 class SessionOps(object):
@@ -104,6 +107,8 @@ class SessionOps(object):
             return self._device_sample(args)
         if address == "/live/devices/get/state":
             return self._devices_state(args)
+        if address == "/live/view/get/selection":
+            return self._selection()
         raise BridgeError("ADDRESS_NOT_ALLOWED", "Unsupported Live query: %s" % address)
 
     def _session_command(self, address, args):
@@ -133,6 +138,7 @@ class SessionOps(object):
             "/live/device/replace_sample": self._replace_simpler_sample,
             "/live/device/set_enabled": self._set_device_enabled,
             "/live/device/delete": self._delete_device,
+            "/live/view/select": self._select,
         }
         handler = handlers.get(address)
         if handler is None:
@@ -1039,3 +1045,48 @@ class SessionOps(object):
         self._confirmed(args[5], "delete_device")
         self._require_method(track, "delete_device", "Deleting a device")
         track.delete_device(device_index)
+
+    # ------------------------------------------------------------------ selection
+
+    def _track_location(self, track):
+        song = self.song()
+        if track == song.master_track:
+            return "master", 0
+        for kind, tracks in (("track", song.tracks), ("return", song.return_tracks)):
+            tracks = list(tracks)
+            if track in tracks:
+                return kind, tracks.index(track)
+        return None, -1
+
+    def _selection(self):
+        # Reply: trackKind, trackIndex, trackName, sceneIndex, sceneName, hasClip, clipName.
+        # trackKind is None and indexes are -1 when Live shows nothing selected there.
+        view = self.song().view
+        track = view.selected_track
+        kind, index = self._track_location(track) if track is not None else (None, -1)
+        scenes = list(self.song().scenes)
+        scene = view.selected_scene
+        scene_index = scenes.index(scene) if scene in scenes else -1
+        has_clip, clip_name = False, None
+        if kind == "track" and scene_index >= 0:
+            slot = list(track.clip_slots)[scene_index]
+            has_clip = bool(slot.has_clip)
+            clip_name = slot.clip.name if has_clip else None
+        return [kind, index, track.name if track is not None else None, scene_index, scene.name if scene_index >= 0 else None, has_clip, clip_name]
+
+    def _select(self, args):
+        # args: kind or None, index, expectedTrackName, sceneIndex (-1 for none), expectedSceneName.
+        self._require_args(args, 5, "/live/view/select")
+        view = self.song().view
+        track = None
+        if args[0] is not None:
+            _kind, _index, track = self._named_any_track(args[:3])
+        scene = None
+        if args[3] is not None and args[3] != -1:
+            _scene_index, scene = self._named_scene([args[3], args[4]])
+        if track is None and scene is None:
+            raise BridgeError("INVALID_ARGUMENTS", "Select a track, a scene, or both")
+        if track is not None:
+            view.selected_track = track
+        if scene is not None:
+            view.selected_scene = scene
