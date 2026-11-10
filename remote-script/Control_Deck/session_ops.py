@@ -44,6 +44,7 @@ SESSION_QUERIES = (
     "/live/devices/get/state",
     "/live/view/get/selection",
     "/live/meters/get",
+    "/live/app_view/get",
 ) + RACK_QUERIES + AUTOMATION_QUERIES
 SESSION_COMMANDS = (
     "/live/mixer/set",
@@ -72,13 +73,17 @@ SESSION_COMMANDS = (
     "/live/device/set_enabled",
     "/live/device/delete",
     "/live/view/select",
+    "/live/app_view/show",
 ) + RACK_COMMANDS + AUTOMATION_COMMANDS
 # Undo and redo move through Live's history, so they must not open a step of their own.
 # Same limit as Control_Deck.MAX_ARRANGEMENT_BEATS (importing it here would be circular).
 MAX_ARRANGEMENT_BEATS = 1576800.0
 SAMPLE_EXTENSIONS = (".wav", ".aif", ".aiff", ".mp3", ".flac")
 # Selecting changes Live's view, not the set, so it is not an undoable step either.
-NO_UNDO_STEP = ("/live/song/undo", "/live/song/redo", "/live/view/select")
+NO_UNDO_STEP = ("/live/song/undo", "/live/song/redo", "/live/view/select", "/live/app_view/show")
+# Live's application view names.
+MAIN_VIEWS = {"session": "Session", "arrangement": "Arranger"}
+DETAIL_VIEWS = {"clip": "Detail/Clip", "devices": "Detail/DeviceChain"}
 
 
 class SessionOps(RackOps, AutomationOps):
@@ -114,6 +119,8 @@ class SessionOps(RackOps, AutomationOps):
             return self._selection()
         if address == "/live/meters/get":
             return self._meters()
+        if address == "/live/app_view/get":
+            return self._app_view_state()
         if address in RACK_QUERIES:
             return self._rack_query(address, args)
         if address in AUTOMATION_QUERIES:
@@ -148,6 +155,7 @@ class SessionOps(RackOps, AutomationOps):
             "/live/device/set_enabled": self._set_device_enabled,
             "/live/device/delete": self._delete_device,
             "/live/view/select": self._select,
+            "/live/app_view/show": self._show_app_view,
         }
         if address in RACK_COMMANDS:
             return self._rack_command(address, args)
@@ -1124,3 +1132,44 @@ class SessionOps(RackOps, AutomationOps):
         for row in rows:
             values.extend(row)
         return values
+
+    # ------------------------------------------------------------------ application view
+
+    def _app_view(self):
+        view = getattr(self.application(), "view", None)
+        if view is None or not callable(getattr(view, "is_view_visible", None)):
+            raise BridgeError("LIVE_VERSION_UNSUPPORTED", "This Live does not expose its window views")
+        return view
+
+    def _app_view_state(self):
+        # Reply: main view (session or arrangement), then Detail, clip editor, device chain, and Browser visibility.
+        view = self._app_view()
+        visible = lambda name: bool(view.is_view_visible(name))
+        focused = str(getattr(view, "focused_document_view", "") or "")
+        main = "arrangement" if focused == "Arranger" or (not focused and visible("Arranger")) else "session"
+        return [main, visible("Detail"), visible("Detail/Clip"), visible("Detail/DeviceChain"), visible("Browser")]
+
+    def _show_app_view(self, args):
+        # args: main (session, arrangement, or None), detail (clip, devices, hide, or None), browser (True, False, or None).
+        self._require_args(args, 3, "/live/app_view/show")
+        main, detail, browser = args[0], args[1], args[2]
+        if main is not None and main not in MAIN_VIEWS:
+            raise BridgeError("INVALID_ARGUMENTS", "View must be session or arrangement")
+        if detail is not None and detail not in DETAIL_VIEWS and detail != "hide":
+            raise BridgeError("INVALID_ARGUMENTS", "Detail must be clip, devices, or hide")
+        if browser is not None and not isinstance(browser, bool):
+            raise BridgeError("INVALID_ARGUMENTS", "Browser must be true or false")
+        if main is None and detail is None and browser is None:
+            raise BridgeError("INVALID_ARGUMENTS", "Choose a view, the detail view, or the browser")
+        view = self._app_view()
+        if main is not None:
+            view.show_view(MAIN_VIEWS[main])
+            view.focus_view(MAIN_VIEWS[main])
+        if detail == "hide":
+            view.hide_view("Detail")
+        elif detail is not None:
+            view.show_view(DETAIL_VIEWS[detail])
+        if browser is True:
+            view.show_view("Browser")
+        elif browser is False:
+            view.hide_view("Browser")

@@ -1078,6 +1078,32 @@ export class SessionTools {
   }
 
 
+  // ------------------------------------------------------------------ application view
+
+  private async viewState() {
+    const [main, detail, clipEditor, devices, browser] = (await this.live.query("/live/app_view/get")).args;
+    return { main: main as "session" | "arrangement", detail: detail === true, clipEditor: clipEditor === true, devices: devices === true, browser: browser === true };
+  }
+
+  getView(): Promise<ToolResult> {
+    return this.read("get_view", () => this.viewState());
+  }
+
+  showView(input: { view?: "session" | "arrangement"; detail?: "clip" | "devices" | "hide"; browser?: boolean; dryRun?: boolean }): Promise<ToolResult> {
+    return this.change("show_view", input, input.dryRun ?? false, async () => {
+      if (input.view === undefined && input.detail === undefined && input.browser === undefined) throw new Error("Pass view, detail, browser, or a mix of them.");
+      return { address: "/live/app_view/show", args: [input.view ?? null, input.detail ?? null, input.browser ?? null], before: await this.viewState() };
+    }, async before => {
+      const done = (state: Awaited<ReturnType<SessionTools["viewState"]>>) =>
+        (input.view === undefined || state.main === input.view) &&
+        (input.detail === undefined || (input.detail === "hide" ? !state.detail : input.detail === "clip" ? state.clipEditor : state.devices)) &&
+        (input.browser === undefined || state.browser === input.browser);
+      const { value: after, settled } = await this.poll(() => this.viewState(), done);
+      if (!settled) throw new Error(`Live shows the ${after.main} view, detail ${after.detail ? (after.clipEditor ? "clip" : after.devices ? "devices" : "open") : "hidden"}, browser ${after.browser ? "shown" : "hidden"}.`);
+      return { before, after };
+    });
+  }
+
   // ------------------------------------------------------------------ selection
 
   private async selection() {

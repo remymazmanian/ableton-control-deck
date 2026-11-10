@@ -532,3 +532,35 @@ describe("selection", () => {
     expect(live.send).not.toHaveBeenCalled();
   });
 });
+
+describe("application view", () => {
+  function viewLive() {
+    let state: [string, boolean, boolean, boolean, boolean] = ["session", false, false, false, false];
+    return {
+      sent: [] as unknown[][],
+      send: vi.fn(async function (this: unknown, address: string, raw: unknown[] = []) {
+        const [view, detail, browser] = raw as [string | null, string | null, boolean | null];
+        if (view) state[0] = view;
+        if (detail === "hide") state = [state[0], false, false, false, state[4]];
+        else if (detail) state = [state[0], true, detail === "clip", detail === "devices", state[4]];
+        if (browser !== null) state[4] = browser;
+      }),
+      query: vi.fn(async () => ({ args: [...state] }))
+    };
+  }
+
+  it("switches to the Arrangement with the clip editor and reads it back", async () => {
+    const live = viewLive();
+    const result = await new SessionTools(live as never, logger as never).showView({ view: "arrangement", detail: "clip" });
+    expect(live.send).toHaveBeenCalledWith("/live/app_view/show", ["arrangement", "clip", null]);
+    expect(result).toMatchObject({ ok: true, data: { before: { main: "session" }, after: { main: "arrangement", detail: true, clipEditor: true } } });
+  });
+
+  it("refuses an empty request and fails when Live does not switch", async () => {
+    const live = viewLive();
+    const tools = new SessionTools(live as never, logger as never);
+    expect(await tools.showView({})).toMatchObject({ ok: false, error: { message: expect.stringMatching(/Pass view, detail, browser/) } });
+    live.send.mockImplementation(async () => undefined);
+    expect(await tools.showView({ view: "arrangement" })).toMatchObject({ ok: false, error: { message: expect.stringMatching(/Live shows the session view/) } });
+  });
+});

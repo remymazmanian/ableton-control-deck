@@ -4,10 +4,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
-In Live 12.4.16 these passed on a Drift track: a volume ramp from silence to full (65 steps, all read back), A-Reverb send steps at −inf, −12, and −6 dB, an LP Freq ramp up and back down (97 steps), listing the three automated parameters, clearing one envelope and then all of them, and refusal of an out-of-range value, a point past the clip end, a stale parameter name, and clearing all without confirmation.
+In Live 12.4.16 view switching passed: to the Arrangement, the clip editor, the device chain with the Browser, back to Session with the Detail view hidden, refusal of an empty request, no undo step added, and the window restored afterwards.
+
+Also in Live 12.4.16, clip automation passed on a Drift track: a volume ramp from silence to full (65 steps, all read back), A-Reverb send steps at −inf, −12, and −6 dB, an LP Freq ramp up and back down (97 steps), listing the three automated parameters, clearing one envelope and then all of them, and refusal of an out-of-range value, a point past the clip end, a stale parameter name, and clearing all without confirmation.
 
 ### Added
 
+- `get_view` and `show_view` read and switch Live's main view (Session or Arrangement), show the clip editor or device chain or hide the Detail view, and show or hide the Browser. Switching is not an undo step.
 - `write_clip_automation`, `get_clip_automation`, and `clear_clip_automation` draw, read, and clear automation inside a Session clip for its track's volume, pan, or sends, or any device parameter by path. Points become steps or ramps, volume and sends take dB, long ramps are split into commands that fit one datagram, and every step is read back.
 
 ## [1.4.0] - 2026-11-09
