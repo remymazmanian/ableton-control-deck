@@ -2,7 +2,7 @@ const CLIP_FIELDS = 4;
 const NOTE_FIELDS = 6;
 const NOTE_HEADER = 5;
 export const MAX_ARRANGEMENT_BEATS = 1_576_800;
-export const MAX_NOTES_PER_CALL = 256;
+export { MAX_NOTES_PER_CALL } from "./note-chunks.js";
 const TIME_TOLERANCE = 0.001;
 
 export interface ArrangementNote {
@@ -120,7 +120,7 @@ export function notesStartingInRange(notes: readonly ArrangementNote[], range: A
   );
 }
 
-export function verifyAddedNotes(requested: ReadonlyArray<{ pitch: number; startTime: number; duration: number; velocity: number; mute: boolean }>, actual: readonly ArrangementNote[]): void {
+export function verifyAddedNotes(requested: ReadonlyArray<{ pitch: number; startTime: number; duration: number; velocity: number; mute: boolean }>, actual: readonly ArrangementNote[], clipLabel = "the arrangement clip"): void {
   const used = new Set<number>();
   const missing = requested.filter(note => {
     const index = actual.findIndex((candidate, position) => !used.has(position) && sameRequestedNote(note, candidate));
@@ -130,7 +130,7 @@ export function verifyAddedNotes(requested: ReadonlyArray<{ pitch: number; start
   });
   if (!missing.length) return;
   const sample = missing.slice(0, 5).map(note => `pitch ${note.pitch} at ${note.startTime} (duration ${note.duration}, velocity ${note.velocity}${note.mute ? ", muted" : ""})`).join("; ");
-  throw new Error(`Note verification failed: ${missing.length} of ${requested.length} requested notes are not in the arrangement clip after writing. Missing: ${sample}`);
+  throw new Error(`Note verification failed: ${missing.length} of ${requested.length} requested notes are not in ${clipLabel} after writing. Missing: ${sample}`);
 }
 
 export function verifyModifiedNotes(desired: readonly ArrangementNote[], actual: readonly ArrangementNote[]): void {

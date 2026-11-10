@@ -12,6 +12,7 @@ import { PluginTools } from "./plugin-tools.js";
 import { OmnihostClient } from "./omnihost-client.js";
 import { OmnihostTools } from "./omnihost-tools.js";
 import { LAUNCH_MODES, LAUNCH_QUANTIZATIONS, SessionTools, WARP_MODES } from "./session-tools.js";
+import { MAX_NOTES_PER_CALL } from "./note-chunks.js";
 import { fromProjectRoot } from "./paths.js";
 
 const { version } = JSON.parse(readFileSync(fromProjectRoot("package.json"), "utf8")) as { version: string };
@@ -36,9 +37,9 @@ server.tool("create_midi_track", "Create a MIDI track at index (-1 appends).", {
 server.tool("create_audio_track", "Create an audio track at index (-1 appends).", { index: z.number().int().min(-1).default(-1), dryRun: z.boolean().default(false) }, async ({ index, dryRun }) => response(await commands.createAudioTrack(index, dryRun)));
 server.tool("rename_track", "Rename a track selected by explicit index.", { trackIndex: z.number().int().min(0), name: z.string().min(1), dryRun: z.boolean().default(false) }, async ({ trackIndex, name, dryRun }) => response(await commands.renameTrack(trackIndex, name, dryRun)));
 server.tool("create_midi_clip", "Create a Session View MIDI clip.", { trackIndex: z.number().int().min(0), sceneIndex: z.number().int().min(0), lengthBeats: z.number().positive(), dryRun: z.boolean().default(false) }, async ({ trackIndex, sceneIndex, lengthBeats, dryRun }) => response(await commands.createMidiClip(trackIndex, sceneIndex, lengthBeats, dryRun)));
-server.tool("add_midi_notes", "Validate and add MIDI notes to a Session View clip. Ableton note names use C3=60.", {
+server.tool("add_midi_notes", "Validate and add MIDI notes to a Session View clip. Ableton note names use C3=60. Up to 10000 notes; the write is split into datagram-sized batches and read back once.", {
   trackIndex: z.number().int().min(0), sceneIndex: z.number().int().min(0),
-  notes: z.array(z.object({ pitch: z.union([z.number().int(), z.string()]), startTime: z.number(), duration: z.number(), velocity: z.number().int(), mute: z.boolean().default(false) })).min(1),
+  notes: z.array(z.object({ pitch: z.union([z.number().int(), z.string()]), startTime: z.number(), duration: z.number(), velocity: z.number().int(), mute: z.boolean().default(false) })).min(1).max(MAX_NOTES_PER_CALL),
   dryRun: z.boolean().default(false)
 }, async ({ trackIndex, sceneIndex, notes, dryRun }) => response(await commands.addMidiNotes(trackIndex, sceneIndex, notes, dryRun)));
 server.tool("delete_track", "Delete a track by explicit index. confirm=true is mandatory except in dry-run mode.", { trackIndex: z.number().int().min(0), confirm: z.boolean().default(false), dryRun: z.boolean().default(false) }, async ({ trackIndex, confirm, dryRun }) => response(await commands.deleteTrack(trackIndex, confirm, dryRun)));
@@ -184,14 +185,14 @@ server.tool("create_arrangement_midi_clip", "Create an empty Arrangement MIDI cl
 }, async input => response(await live.createArrangementMidiClip(input)));
 const arrangementClipTarget = { trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), clipIndex: z.number().int().min(0).optional(), startBeats: z.number().min(0).optional() };
 server.tool("get_arrangement_clip_notes", "Read notes in one Arrangement MIDI clip, addressed by track plus clip index or start time. Note times are beats from the start of the clip.", arrangementClipTarget, async input => response(await live.getArrangementClipNotes(input)));
-server.tool("add_arrangement_clip_notes", "Add MIDI notes to an Arrangement MIDI clip and read them back. A requested note that is missing or different fails the call. Note times are beats from the start of the clip.", {
+server.tool("add_arrangement_clip_notes", "Add MIDI notes to an Arrangement MIDI clip and read them back once. A requested note that is missing or different fails the call. Note times are beats from the start of the clip. Up to 10000 notes, sent as datagram-sized batches.", {
   ...arrangementClipTarget,
-  notes: z.array(z.object({ pitch: z.union([z.number().int(), z.string()]), startTime: z.number(), duration: z.number(), velocity: z.number().int(), mute: z.boolean().default(false) })).min(1),
+  notes: z.array(z.object({ pitch: z.union([z.number().int(), z.string()]), startTime: z.number(), duration: z.number(), velocity: z.number().int(), mute: z.boolean().default(false) })).min(1).max(MAX_NOTES_PER_CALL),
   dryRun: z.boolean().default(false)
 }, async input => response(await live.addArrangementClipNotes(input)));
-server.tool("modify_arrangement_clip_notes", "Change existing Arrangement MIDI notes by note id from get_arrangement_clip_notes, then read them back. Unspecified fields stay as they are.", {
+server.tool("modify_arrangement_clip_notes", "Change existing Arrangement MIDI notes by note id from get_arrangement_clip_notes, then read them back once. Unspecified fields stay as they are. Up to 10000 notes, sent as datagram-sized batches.", {
   ...arrangementClipTarget,
-  notes: z.array(z.object({ noteId: z.number().int().min(0), pitch: z.union([z.number().int(), z.string()]).optional(), startTime: z.number().min(0).optional(), duration: z.number().positive().optional(), velocity: z.number().int().min(1).max(127).optional(), mute: z.boolean().optional() })).min(1),
+  notes: z.array(z.object({ noteId: z.number().int().min(0), pitch: z.union([z.number().int(), z.string()]).optional(), startTime: z.number().min(0).optional(), duration: z.number().positive().optional(), velocity: z.number().int().min(1).max(127).optional(), mute: z.boolean().optional() })).min(1).max(MAX_NOTES_PER_CALL),
   dryRun: z.boolean().default(false)
 }, async input => response(await live.modifyArrangementClipNotes(input)));
 server.tool("remove_arrangement_clip_notes", "Remove Arrangement MIDI notes whose start lies in a pitch and time range, using Clip.remove_notes_extended, then read the clip back. Times are beats from the start of the clip. The end of the time range is exclusive.", {

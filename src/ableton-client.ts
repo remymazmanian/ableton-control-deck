@@ -6,6 +6,35 @@ import { fromProjectRoot } from "./paths.js";
 
 export const BRIDGE_PROTOCOL = "ableton-control-deck/1";
 export const TOKEN_FILE = "data/bridge-token";
+/**
+ * Reject a datagram before `send` so the caller sees a request-too-large error
+ * instead of Node's raw `EMSGSIZE`. 8 KB sits under the macOS UDP cap (~9216)
+ * and well under the remote script's 32768-byte receive buffer.
+ */
+export const MAX_UDP_REQUEST_BYTES = 8 * 1024;
+const DATAGRAM_ID_PLACEHOLDER = "00000000-0000-4000-8000-000000000000";
+
+export function liveCommandDatagramBytes(token: string, address: string, args: readonly unknown[], id = DATAGRAM_ID_PLACEHOLDER): number {
+  return Buffer.byteLength(JSON.stringify({
+    protocol: BRIDGE_PROTOCOL,
+    id,
+    token,
+    method: "live.command",
+    params: { address, args }
+  }), "utf8");
+}
+
+export function requestTooLargeError(bytes: number, detail?: "limit" | "EMSGSIZE"): AbletonBridgeError {
+  const why = detail === "EMSGSIZE"
+    ? "the operating system rejected the UDP datagram (EMSGSIZE)"
+    : `the ${MAX_UDP_REQUEST_BYTES}-byte UDP datagram limit`;
+  return new AbletonBridgeError("REQUEST_TOO_LARGE", `Request too large: ${bytes} bytes exceeds ${why}.`);
+}
+
+export function asBridgeSendError(error: NodeJS.ErrnoException, bytes: number): Error {
+  if (error.code === "EMSGSIZE") return requestTooLargeError(bytes, "EMSGSIZE");
+  return error;
+}
 
 export function readBridgeToken(): string {
   if (process.env.CONTROL_DECK_TOKEN) return process.env.CONTROL_DECK_TOKEN;
@@ -126,6 +155,10 @@ export class AbletonClient implements LiveControlClient {
     await this.request("live.command", { address, args: args.map(unwrapArgument) });
   }
 
+  commandBytes(address: string, args: readonly OscArgument[] = []): number {
+    return liveCommandDatagramBytes(this.token, address, args.map(unwrapArgument));
+  }
+
   query(address: string, args: OscArgument[] = [], _expectedAddress = address): Promise<OscReply> {
     return this.request("live.query", { address, args: args.map(unwrapArgument) });
   }
@@ -135,6 +168,7 @@ export class AbletonClient implements LiveControlClient {
     await this.ready;
     const id = randomUUID();
     const request = Buffer.from(JSON.stringify({ protocol: BRIDGE_PROTOCOL, id, token: this.token, method, params }), "utf8");
+    if (request.length > MAX_UDP_REQUEST_BYTES) throw requestTooLargeError(request.length);
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
@@ -147,7 +181,7 @@ export class AbletonClient implements LiveControlClient {
         if (!pending) return;
         clearTimeout(pending.timer);
         this.pending.delete(id);
-        pending.reject(error);
+        pending.reject(asBridgeSendError(error, request.length));
       });
     });
   }

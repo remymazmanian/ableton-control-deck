@@ -2,6 +2,7 @@ import { realpath, stat } from "node:fs/promises";
 import { extname, isAbsolute } from "node:path";
 import { MAX_ARRANGEMENT_BEATS, MAX_NOTES_PER_CALL, notesStartingInRange, parseArrangementClips, parseNoteBody, type ArrangementClipDescriptor, verifyModifiedNotes, verifyRemovedNotes, type ArrangementNote } from "./arrangement-clips.js";
 import { JsonLogger } from "./logger.js";
+import { ARRANGEMENT_MODIFY_NOTES_PER_DATAGRAM, chunkOscNotes } from "./note-chunks.js";
 import { assertOutgoingNote, noteNameToMidi } from "./validation.js";
 import { oscFloat, oscInt, type LiveControlClient, type OscArgument, type ToolResult } from "./types.js";
 
@@ -253,16 +254,23 @@ export class SessionTools {
   }
 
   /** Check inputs and current state, then send one bridge command and verify it. Every failure is a ToolResult. */
-  private async change<T, P>(tool: string, input: unknown, dryRun: boolean, prepare: () => Promise<{ address: string; args: OscArgument[]; before: P }>, verify: (before: P) => Promise<T>): Promise<ToolResult<T>> {
+  private async change<T, P>(tool: string, input: unknown, dryRun: boolean, prepare: () => Promise<{ address: string; args: OscArgument[]; before: P; moreBatches?: OscArgument[][] }>, verify: (before: P) => Promise<T>): Promise<ToolResult<T>> {
     const started = performance.now();
     try {
-      const { address, args, before } = await prepare();
+      const { address, args, before, moreBatches = [] } = await prepare();
       const operation = { address, args };
       if (dryRun || this.defaultDryRun) {
         await this.logger.write({ tool, args: input, liveOperation: operation, durationMs: performance.now() - started, success: true, dryRun: true });
-        return { ok: true, dryRun: true, tool, intendedOperations: [operation] };
+        return { ok: true, dryRun: true, tool, intendedOperations: [operation, ...moreBatches.map(batch => ({ address, args: batch }))] };
       }
-      await this.live.send(address, args);
+      // A write too big for one datagram goes as several commands to the same address, in order.
+      const batches = [args, ...moreBatches];
+      for (let index = 0; index < batches.length; index++) {
+        try { await this.live.send(address, batches[index]); } catch (error) {
+          if (index === 0) throw error;
+          throw new Error(`Batch ${index + 1} of ${batches.length} failed after ${index} landed: ${error instanceof Error ? error.message : String(error)}. Read the clip back before retrying.`);
+        }
+      }
       const data = await verify(before);
       await this.logger.write({ tool, args: input, liveOperation: operation, response: data, durationMs: performance.now() - started, success: true });
       return { ok: true, dryRun: false, tool, data };
@@ -814,9 +822,12 @@ export class SessionTools {
         assertOutgoingNote(next, change.velocity === undefined ? 0 : 1);
         return next;
       });
-      const args = this.clipArgs(input);
-      for (const note of desired) args.push(oscInt(note.noteId), oscInt(note.pitch), oscFloat(note.startTime), oscFloat(note.duration), oscInt(note.velocity), note.mute);
-      return { address: "/live/session_clip/modify/notes", args, before: null };
+      const address = "/live/session_clip/modify/notes";
+      const prefix = this.clipArgs(input);
+      const encode = (note: ArrangementNote): OscArgument[] => [oscInt(note.noteId), oscInt(note.pitch), oscFloat(note.startTime), oscFloat(note.duration), oscInt(note.velocity), note.mute];
+      // macOS refuses a UDP datagram near 9 KB, and 256 notes with long times can reach 14 KB, so split by size.
+      const [first, ...rest] = chunkOscNotes(this.live, desired, { address, prefix, encode, maxPerChunk: ARRANGEMENT_MODIFY_NOTES_PER_DATAGRAM }).map(chunk => [...prefix, ...chunk.flatMap(encode)]);
+      return { address, args: first, before: null, moreBatches: rest };
     }, async () => {
       const { notes } = await this.sessionNotes(input.trackIndex, input.sceneIndex);
       verifyModifiedNotes(desired, notes);

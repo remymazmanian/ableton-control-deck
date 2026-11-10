@@ -47,6 +47,8 @@ Still unchecked: REX and Complex Pro warp modes, and tracks nested more than one
 
 ### Changed
 
+- Large note writes are split into ordered batches that each fit one UDP datagram, so `add_midi_notes`, `add_arrangement_clip_notes`, `modify_arrangement_clip_notes`, and `modify_clip_notes` accept up to 10000 notes (256 for `modify_clip_notes`). macOS refuses a datagram near 9 KB. A request that is still too large fails with `REQUEST_TOO_LARGE`, and a batch that fails partway says how many notes already landed.
+- `add_midi_notes` reads the clip back and fails with `NOTE_VERIFICATION_FAILED`, naming the missing notes, unless every requested note is there. Before, it returned the raw reply without checking it.
 - Bridge errors for a missing track, scene, device, or parameter now name the index.
 - Dry runs of `set_track_mix` and `set_clip` now report what the real call would refuse: a send or field the track lacks, volume above +6 dB or a send above 0 dB, arming a track that cannot be armed, and audio-only settings on a MIDI clip.
 - `set_track` and `set_clip` put back what they changed when Live refuses a value partway through, such as a routing channel that does not exist for the new routing type.

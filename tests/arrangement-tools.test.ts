@@ -201,6 +201,62 @@ describe("arrangement clips", () => {
     expect(removed).toMatchObject({ ok: true, data: { removedCount: 1, noteCountInClip: 1, notes: [{ noteId: 2, pitch: 67 }] } });
   });
 
+  it("sends more than 256 notes as ordered datagrams and reads the clip back once", async () => {
+    const live = fakeLive({ clips: [["Lead", 0, 400, "midi"]] });
+    const notes = Array.from({ length: 300 }, (_, index) => ({ pitch: 60, startTime: index, duration: 1, velocity: 100 }));
+    const result = await new LiveTools(live as never, logger as never).addArrangementClipNotes({ trackIndex: 0, expectedTrackName: "Drums", clipIndex: 0, notes });
+    expect(result).toMatchObject({ ok: true, data: { noteCountRequested: 300, noteCountInClip: 300, chunks: 2, chunkNoteCounts: [256, 44] } });
+    const writes = live.send.mock.calls.filter(call => call[0] === "/live/arrangement_clip/add/notes");
+    expect(writes).toHaveLength(2);
+    const flattened = writes.flatMap(call => (call[1] as unknown[]).slice(4));
+    expect(flattened).toHaveLength(300 * 5);
+    expect(live.query.mock.calls.filter(call => call[0] === "/live/arrangement_clip/get/notes")).toHaveLength(1);
+  });
+
+  it("reports notes already landed when a later batch fails", async () => {
+    const live = fakeLive({ clips: [["Lead", 0, 400, "midi"]] });
+    const original = live.send.getMockImplementation();
+    live.send.mockImplementation(async (address: string, args: unknown[] = []) => {
+      const priorWrites = live.sent.filter(item => item === "/live/arrangement_clip/add/notes").length;
+      if (address === "/live/arrangement_clip/add/notes" && priorWrites >= 1) throw new Error("send EMSGSIZE");
+      return original?.(address, args);
+    });
+    const notes = Array.from({ length: 300 }, (_, index) => ({ pitch: 60, startTime: index, duration: 1, velocity: 100 }));
+    const result = await new LiveTools(live as never, logger as never).addArrangementClipNotes({ trackIndex: 0, expectedTrackName: "Drums", clipIndex: 0, notes });
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "NOTE_BATCH_PARTIAL",
+        message: expect.stringMatching(/256 of 300 notes landed/),
+        details: { notesLanded: 256, notesRequested: 300, chunksCompleted: 1, chunksPlanned: 2, phase: "send" }
+      }
+    });
+    expect(live.notes[0]).toHaveLength(256);
+  });
+
+  it("refuses more than 10000 notes before talking to Live", async () => {
+    const live = fakeLive({ clips: [["Lead", 0, 4, "midi"]] });
+    const notes = Array.from({ length: 10_001 }, (_, index) => ({ pitch: 60, startTime: index, duration: 1, velocity: 100 }));
+    await expect(new LiveTools(live as never, logger as never).addArrangementClipNotes({ trackIndex: 0, expectedTrackName: "Drums", clipIndex: 0, notes })).rejects.toThrow(/10000/);
+    expect(live.send).not.toHaveBeenCalled();
+  });
+
+  it("modifies a long note list in more than one datagram", async () => {
+    const live = fakeLive({ clips: [["Lead", 0, 400, "midi"]] });
+    const tools = new LiveTools(live as never, logger as never);
+    const notes = Array.from({ length: 300 }, (_, index) => ({ pitch: 60, startTime: index, duration: 1, velocity: 100 }));
+    await tools.addArrangementClipNotes({ trackIndex: 0, expectedTrackName: "Drums", clipIndex: 0, notes });
+    live.send.mockClear();
+    const modified = await tools.modifyArrangementClipNotes({
+      trackIndex: 0,
+      expectedTrackName: "Drums",
+      clipIndex: 0,
+      notes: notes.map((_note, index) => ({ noteId: index + 1, velocity: 90 }))
+    });
+    expect(modified).toMatchObject({ ok: true, data: { noteCountModified: 300, chunks: 2, chunkNoteCounts: [256, 44] } });
+    expect(live.send.mock.calls.filter(call => call[0] === "/live/arrangement_clip/modify/notes")).toHaveLength(2);
+  });
+
   it("fails the add when the read-back is missing a requested note", async () => {
     const live = fakeLive({ clips: [["Lead", 0, 4, "midi"]] });
     live.dropNoteWrites = true;

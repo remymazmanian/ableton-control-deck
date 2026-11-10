@@ -14,6 +14,8 @@ export interface OscReply {
 export interface LiveControlClient {
   send(address: string, args?: OscArgument[]): Promise<void>;
   query(address: string, args?: OscArgument[], expectedAddress?: string): Promise<OscReply>;
+  /** Byte length of the datagram `send` would transmit. Absent on test doubles. */
+  commandBytes?(address: string, args?: readonly OscArgument[]): number;
 }
 
 export interface ToolResult<T = unknown> {
