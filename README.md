@@ -71,7 +71,13 @@ Full documentation — component descriptions, Live setup, the complete MCP tool
 
 ## Install
 
-### Quickstart (no coding required)
+### macOS installer
+
+`Ableton Control Deck <version>.pkg` is signed and notarized and includes its own Node.js, so nothing else needs installing first. Open it and follow the steps. It puts the program in `/Library/Application Support/Ableton Control Deck`, puts the app and **Uninstall Ableton Control Deck** in `/Applications/Ableton Control Deck`, sets up Live and the background services for you, and opens the connection guide. Your settings and snapshots go in `~/Library/Application Support/Ableton Control Deck`. Then do steps 4 and 5 below.
+
+The bundled Node.js is the LTS release current when the package was built, and checked against nodejs.org's checksums and signature. If Homebrew has a newer Node.js, Control Deck uses that instead.
+
+### Quickstart from the source (no coding required)
 
 1. **Install Node.js** — download the LTS version from [nodejs.org](https://nodejs.org) and run its installer with the default options. (Control Deck runs on it; you never have to touch it again.)
 2. **Download Control Deck** — use GitHub's green **Code → Download ZIP** button, unzip it, and move the folder somewhere permanent, like your home folder. Don't leave it in Downloads — the installer pins services to the folder's location and will ask you to move it.
@@ -122,7 +128,11 @@ npm run test:bridge    # remote-script protocol tests (Python)
 npm run index:plugins  # rebuild the local plug-in inventory
 npm run samples:index  # refresh the sample index
 npm run build:macos    # build the native wrapper app
+npm run build:pkg      # build, sign, and notarize the macOS installer (build/)
+npm run uninstall      # remove what setup installed; asks whether to keep settings
 ```
+
+`build:pkg` needs the Developer ID Application and Installer certificates and a `notarytool` keychain profile; see the top of `installer/macos/build-pkg.sh`. `-- --no-notarize` skips notarization.
 
 The dashboard has its own build check:
 
