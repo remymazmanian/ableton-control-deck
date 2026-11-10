@@ -178,6 +178,12 @@ Automation inside a Session clip, for a parameter on the clip's own track: its v
 
 Live has no API to list an envelope's breakpoints, so reads sample its value over time. At an exact step boundary Live reports the earlier step's value, so each sample is taken just after its time.
 
+### Snapshots
+
+- **snapshot_set** — Save the set's state under a name: tempo, time signature, song settings, scenes, every track's mix and routing, every top-level device's on/off state and parameter values, and every Session clip's settings with a fingerprint of its notes. Snapshots are kept in the project's `data/snapshots` folder (not committed). A name in use needs `overwrite: true`. Reading every parameter takes a few seconds on a set with large plug-ins.
+- **list_snapshots** — The saved snapshots and when each was taken.
+- **diff_snapshot** — Compare the set now, or another snapshot with `against`, to a saved one and list every change in plain words, such as `Track 'Bass': volume 0.0 dB → -6.0 dB`, `'Drift' turned off`, or `Clip 'Chords' (track 3, scene 1): notes changed`.
+
 ### Meters and mix check
 
 Live's output meters read 0 to 1 on a scale that is linear in dB. Control Deck converts them using a calibration made in Live 12.4.16 with test tones at 0, −6, −12, −18, −24, and −36 dBFS: 0 dBFS reads 0.921, each dB is 0.0132, so the top of the meter is about +6 dB and the bottom about −70 dB. The meter moves in steps of about 1.5 dB, so levels are that precise and no more. Meters read silence while Live is stopped.
