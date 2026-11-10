@@ -11,7 +11,8 @@ import { AbletonClient } from "./ableton-client.js";
 import { PluginTools } from "./plugin-tools.js";
 import { OmnihostClient } from "./omnihost-client.js";
 import { OmnihostTools } from "./omnihost-tools.js";
-import { LAUNCH_MODES, LAUNCH_QUANTIZATIONS, SessionTools, WARP_MODES } from "./session-tools.js";
+import { LAUNCH_MODES, LAUNCH_QUANTIZATIONS, WARP_MODES } from "./session-tools.js";
+import { RackTools } from "./rack-tools.js";
 import { MAX_NOTES_PER_CALL } from "./note-chunks.js";
 import { fromProjectRoot } from "./paths.js";
 
@@ -24,7 +25,7 @@ const samples = new SampleIndex();
 const local = new LocalCapabilities();
 const plugins = new PluginTools(ableton, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
 const omnihostClient = new OmnihostClient();
-const session = new SessionTools(ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1", async id => String((await samples.getMetadata({ id }) as { path: string }).path));
+const session = new RackTools(ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1", async id => String((await samples.getMetadata({ id }) as { path: string }).path));
 const omnihost = new OmnihostTools(omnihostClient, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
 const server = new McpServer({ name: "ableton-control-deck", version });
 const response = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }], structuredContent: value as Record<string, unknown> });
@@ -154,6 +155,25 @@ server.tool("get_selection", "Read what is selected in Live: the track (includin
 server.tool("select", "Select a track (or return track, or the master), a scene, or both in Live, by index and current name, then read the selection back. Selecting a track and a scene highlights that clip slot. It does not change the set and is not an undo step.", {
   trackKind, trackIndex: z.number().int().min(0).optional(), expectedTrackName: z.string().min(1).optional(), sceneIndex: z.number().int().min(0).optional(), expectedSceneName: z.string().optional(), dryRun: z.boolean().default(false)
 }, async input => response(await session.select(input)));
+const devicePath = z.string().regex(/^\d+(\/\d+\/\d+){0,7}$/, "A device path is a device index, or device/chain/device such as 0/2/1");
+const rackTarget = { trackKind, trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), path: devicePath, expectedRackName: z.string().min(1) };
+server.tool("get_rack", "Read a rack (Instrument, Audio Effect, MIDI Effect, or Drum Rack) at a device path: its chains and their devices with paths, visible macros with values as Live shows them, macro variations, and for a Drum Rack every pad that holds a sound. Path \"0\" is the first device on the track; \"0/2/1\" is device 1 in chain 2 of that rack.", { trackKind, trackIndex: z.number().int().min(0), path: devicePath }, async input => response(await session.getRack(input)));
+server.tool("get_device_parameters_at_path", "List every parameter of the device at a path, including devices inside racks, with value, range, and the value as Live shows it.", { trackKind, trackIndex: z.number().int().min(0), path: devicePath }, async input => response(await session.getDeviceParametersAtPath(input)));
+server.tool("set_device_parameter_at_path", "Set one parameter of the device at a path, including inside racks, by parameter index and current name, then read it back. Parameter 0 is usually Device On, so this also turns a nested device on or off.", {
+  trackKind, trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), path: devicePath, expectedDeviceName: z.string().min(1), parameterIndex: z.number().int().min(0), expectedParameterName: z.string().min(1), value: z.number(), dryRun: z.boolean().default(false)
+}, async input => response(await session.setDeviceParameterAtPath(input)));
+server.tool("set_rack_macros", "Set one or more rack macros (1-16) in one undo step, by rack path and current name, and read them back as Live shows them. Values use each macro's own range, usually 0-127.", {
+  ...rackTarget, macros: z.array(z.object({ macro: z.number().int().min(1).max(16), value: z.number() })).min(1).max(16), dryRun: z.boolean().default(false)
+}, async input => response(await session.setRackMacros(input)));
+server.tool("set_rack_chain", "Rename, mute, or solo a rack chain, by rack path, chain index, and their current names, then read it back.", {
+  ...rackTarget, chainIndex: z.number().int().min(0), expectedChainName: z.string(), name: z.string().min(1).max(128).optional(), mute: z.boolean().optional(), solo: z.boolean().optional(), dryRun: z.boolean().default(false)
+}, async input => response(await session.setRackChain(input)));
+server.tool("set_drum_pad", "Mute or solo a Drum Rack pad, by its note (a number or a name such as C1) and current pad name, then read it back.", {
+  ...rackTarget, note: z.union([z.number().int().min(0).max(127), z.string()]), expectedPadName: z.string(), mute: z.boolean().optional(), solo: z.boolean().optional(), dryRun: z.boolean().default(false)
+}, async input => response(await session.setDrumPad(input)));
+server.tool("rack_variation", "Store the rack's current macros as a new variation, recall or delete a variation by index, or randomize the macros. Deleting needs confirm=true. Needs Live 11 or newer.", {
+  ...rackTarget, action: z.enum(["store", "recall", "delete", "randomize"]), variationIndex: z.number().int().min(0).optional(), confirm: z.boolean().default(false), dryRun: z.boolean().default(false)
+}, async input => response(await session.rackVariation(input)));
 
 server.tool("omnihost_status", "Check whether Control Deck OmniHost is loaded and return its full VST3 parameter-index status.", {}, async () => response(await omnihost.status()));
 server.tool("list_omnihost_parameters", "Search Mini V4 parameters indexed by Control Deck OmniHost, excluding MIDI CC helper entries by default.", {
@@ -246,8 +266,8 @@ server.tool("refresh_plugin_index", "Rebuild Control Deck Bridge's plugin index 
 const loadPluginSchema = { trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), name: z.string().min(1), format: pluginFormat, expectedPath: z.string().optional(), dryRun: z.boolean().default(false) };
 server.tool("load_plugin", "Load a resolved plugin on an explicit track and verify the device chain through Control Deck Bridge.", loadPluginSchema, async input => response(await plugins.loadPlugin(input)));
 server.tool("load_plugin_on_track", "Alias of load_plugin with the same explicit track and plugin safeguards.", loadPluginSchema, async input => response(await plugins.loadPlugin(input)));
-server.tool("find_live_device", "Resolve the exact Live Browser path for a native Live device from the Instruments, Audio Effects, MIDI Effects, or Drums categories.", { name: z.string().min(1), path: z.string().optional() }, async ({ name, path }) => response(await plugins.findLiveDevice(name, path)));
-server.tool("load_live_device", "Load a native Live device (e.g. Drum Rack, Echo, Reverb) on an explicit track through Live's Browser, refusing ambiguous names and verifying the device chain.", {
+server.tool("find_live_device", "Resolve the exact Live Browser path for a native Live device or factory preset (kit, rack) from the Instruments, Audio Effects, MIDI Effects, or Drums categories. A preset can be named with or without its extension, such as Strutter Kit.", { name: z.string().min(1), path: z.string().optional() }, async ({ name, path }) => response(await plugins.findLiveDevice(name, path)));
+server.tool("load_live_device", "Load a native Live device or factory preset (e.g. Drum Rack, Echo, Reverb, Strutter Kit) on an explicit track through Live's Browser, refusing ambiguous names and verifying the device chain.", {
   trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), name: z.string().min(1), path: z.string().optional(), dryRun: z.boolean().default(false)
 }, async input => response(await plugins.loadLiveDevice(input)));
 server.tool("load_user_library_item", "Load a User Library item, such as a saved Instrument Rack (.adg) or device preset (.adv), onto an exact track by exact name. Ambiguous names are refused. The device chain is read back. path is a Live Browser path, not a file on disk.", {

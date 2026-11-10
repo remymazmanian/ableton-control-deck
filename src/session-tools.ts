@@ -212,15 +212,15 @@ function describeClip(kind: unknown, props: Record<string, unknown>) {
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-function nonNegativeInteger(value: number, label: string): void {
+export function nonNegativeInteger(value: number, label: string): void {
   if (!Number.isInteger(value) || value < 0) throw new Error(`${label} must be a non-negative integer.`);
 }
 
-function requireName(value: string, label: string): void {
+export function requireName(value: string, label: string): void {
   if (typeof value !== "string") throw new Error(`${label} must be text.`);
 }
 
-function trackArgs(kind: TrackKind, index: number): OscArgument[] {
+export function trackArgs(kind: TrackKind, index: number): OscArgument[] {
   return [kind, oscInt(index)];
 }
 
@@ -229,7 +229,7 @@ export interface ClipTarget { trackIndex: number; sceneIndex: number; expectedTr
 
 export class SessionTools {
   constructor(
-    private readonly live: LiveControlClient,
+    protected readonly live: LiveControlClient,
     private readonly logger = new JsonLogger(),
     private readonly defaultDryRun = false,
     /** Looks up a sample id from search_samples and returns its path. */
@@ -244,7 +244,7 @@ export class SessionTools {
     return { ok: false, dryRun: false, tool, error: { code: "ABLETON_OPERATION_FAILED", message } };
   }
 
-  private async read<T>(tool: string, fn: () => Promise<T>): Promise<ToolResult<T>> {
+  protected async read<T>(tool: string, fn: () => Promise<T>): Promise<ToolResult<T>> {
     const started = performance.now();
     try {
       const data = await fn();
@@ -254,7 +254,7 @@ export class SessionTools {
   }
 
   /** Check inputs and current state, then send one bridge command and verify it. Every failure is a ToolResult. */
-  private async change<T, P>(tool: string, input: unknown, dryRun: boolean, prepare: () => Promise<{ address: string; args: OscArgument[]; before: P; moreBatches?: OscArgument[][] }>, verify: (before: P) => Promise<T>): Promise<ToolResult<T>> {
+  protected async change<T, P>(tool: string, input: unknown, dryRun: boolean, prepare: () => Promise<{ address: string; args: OscArgument[]; before: P; moreBatches?: OscArgument[][] }>, verify: (before: P) => Promise<T>): Promise<ToolResult<T>> {
     const started = performance.now();
     try {
       const { address, args, before, moreBatches = [] } = await prepare();
@@ -277,7 +277,7 @@ export class SessionTools {
     } catch (error) { return this.fail(tool, started, error); }
   }
 
-  private async poll<T>(fn: () => Promise<T>, done: (value: T) => boolean, attempts = POLL_ATTEMPTS): Promise<{ value: T; settled: boolean }> {
+  protected async poll<T>(fn: () => Promise<T>, done: (value: T) => boolean, attempts = POLL_ATTEMPTS): Promise<{ value: T; settled: boolean }> {
     let value = await fn();
     for (let attempt = 1; attempt < attempts && !done(value); attempt++) {
       await sleep(POLL_DELAY_MS);
@@ -335,7 +335,7 @@ export class SessionTools {
     return { name: String(args[2]), props: parsePairs(args, 3) };
   }
 
-  private requireTrackName(actual: string, expected: string, label = "track"): void {
+  protected requireTrackName(actual: string, expected: string, label = "track"): void {
     if (actual !== expected) throw new Error(`Track safeguard failed: expected ${label} '${expected}', found '${actual}'.`);
   }
 

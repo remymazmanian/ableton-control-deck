@@ -181,7 +181,7 @@ class ControlDeckBridge(SessionOps, ControlSurface):
             "pluginLoading": True,
             "capabilities": [
                 "live-control", "read-back-verification", "plugin-browser", "plugin-loading", "user-device-loading",
-                "mixer", "session-launch", "scenes", "clip-properties", "undo", "track-routing", "session-notes", "return-tracks", "sample-loading", "device-control",
+                "mixer", "session-launch", "scenes", "clip-properties", "undo", "track-routing", "session-notes", "return-tracks", "sample-loading", "device-control", "racks",
             ],
         }
 
@@ -908,7 +908,10 @@ class ControlDeckBridge(SessionOps, ControlSurface):
         if root is None:
             raise BridgeError("USER_LIBRARY_UNAVAILABLE", "Ableton's User Library is unavailable")
         matches = []
-        self._find_user_items(root, ["User Library"], name.casefold(), matches, 0)
+        stems = []
+        self._find_user_items(root, ["User Library"], name.casefold(), matches, 0, stems)
+        if not matches:
+            matches = stems
         wanted = params.get("path")
         if wanted is not None and str(wanted).strip():
             wanted_text = str(wanted).strip()
@@ -948,10 +951,13 @@ class ControlDeckBridge(SessionOps, ControlSurface):
         if not name:
             raise BridgeError("INVALID_DEVICE_NAME", "A Live device name is required")
         matches = []
+        stems = []
         for label, root in self._browser_roots():
             if root is None:
                 continue
-            self._find_user_items(root, [label], name.casefold(), matches, 0)
+            self._find_user_items(root, [label], name.casefold(), matches, 0, stems)
+        if not matches:
+            matches = stems
         wanted_path = params.get("path")
         if wanted_path:
             normalized = str(wanted_path).casefold()
@@ -1004,7 +1010,7 @@ class ControlDeckBridge(SessionOps, ControlSurface):
             "selectionRestored": restored,
         }
 
-    def _find_user_items(self, node, path, target_name, matches, depth):
+    def _find_user_items(self, node, path, target_name, matches, depth, stem_matches=None):
         if node is None or depth > 18 or len(matches) > 20:
             return
         try:
@@ -1016,11 +1022,16 @@ class ControlDeckBridge(SessionOps, ControlSurface):
         except Exception:
             loadable = not children
         node_name = str(getattr(node, "name", path[-1] if path else "Unnamed"))
+        # A preset shows its file extension in the Browser ("Strutter Kit.adg"); match with or without it.
+        stem = node_name.rsplit(".", 1)[0] if node_name.lower().endswith((".adg", ".adv", ".alc")) else node_name
         if loadable and node_name.casefold() == target_name:
             matches.append(("/".join(path), node))
+        elif loadable and stem_matches is not None and stem.casefold() == target_name:
+            # Used only when nothing matches exactly, so "Drift" still means the device.
+            stem_matches.append(("/".join(path), node))
         for child in children:
             child_name = str(getattr(child, "name", "Unnamed"))
-            self._find_user_items(child, path + [child_name], target_name, matches, depth + 1)
+            self._find_user_items(child, path + [child_name], target_name, matches, depth + 1, stem_matches)
 
     def _complete(self, address, request_id, ok, result=None, error=None):
         response = {"protocol": PROTOCOL, "id": request_id, "ok": bool(ok)}
