@@ -181,7 +181,7 @@ class ControlDeckBridge(SessionOps, ControlSurface):
             "pluginLoading": True,
             "capabilities": [
                 "live-control", "read-back-verification", "plugin-browser", "plugin-loading", "user-device-loading",
-                "mixer", "session-launch", "scenes", "clip-properties", "undo", "track-routing", "session-notes", "return-tracks", "sample-loading", "device-control", "racks", "meters",
+                "mixer", "session-launch", "scenes", "clip-properties", "undo", "track-routing", "session-notes", "return-tracks", "sample-loading", "device-control", "racks", "meters", "clip-automation",
             ],
         }
 

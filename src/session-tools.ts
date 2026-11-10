@@ -339,7 +339,7 @@ export class SessionTools {
     if (actual !== expected) throw new Error(`Track safeguard failed: expected ${label} '${expected}', found '${actual}'.`);
   }
 
-  private async requireClip(target: ClipTarget) {
+  protected async requireClip(target: ClipTarget) {
     nonNegativeInteger(target.trackIndex, "Track index");
     nonNegativeInteger(target.sceneIndex, "Scene index");
     requireName(target.expectedTrackName, "expectedTrackName");
