@@ -120,7 +120,7 @@ export function notesStartingInRange(notes: readonly ArrangementNote[], range: A
   );
 }
 
-export function verifyAddedNotes(requested: ReadonlyArray<{ pitch: number; startTime: number; duration: number; velocity: number; mute: boolean }>, actual: readonly ArrangementNote[]): void {
+export function verifyAddedNotes(requested: ReadonlyArray<{ pitch: number; startTime: number; duration: number; velocity: number; mute: boolean }>, actual: readonly ArrangementNote[], clipLabel = "the arrangement clip"): void {
   const used = new Set<number>();
   const missing = requested.filter(note => {
     const index = actual.findIndex((candidate, position) => !used.has(position) && sameRequestedNote(note, candidate));
@@ -130,7 +130,7 @@ export function verifyAddedNotes(requested: ReadonlyArray<{ pitch: number; start
   });
   if (!missing.length) return;
   const sample = missing.slice(0, 5).map(note => `pitch ${note.pitch} at ${note.startTime} (duration ${note.duration}, velocity ${note.velocity}${note.mute ? ", muted" : ""})`).join("; ");
-  throw new Error(`Note verification failed: ${missing.length} of ${requested.length} requested notes are not in the arrangement clip after writing. Missing: ${sample}`);
+  throw new Error(`Note verification failed: ${missing.length} of ${requested.length} requested notes are not in ${clipLabel} after writing. Missing: ${sample}`);
 }
 
 export function verifyModifiedNotes(desired: readonly ArrangementNote[], actual: readonly ArrangementNote[]): void {

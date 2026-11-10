@@ -1,3 +1,4 @@
+import { verifyAddedNotes } from "./arrangement-clips.js";
 import { JsonLogger } from "./logger.js";
 import { chunkOscNotes, DatagramBudgetError, MAX_NOTES_PER_CALL, noteBatchErrorBody, NoteBatchPartialError, readBackFailed, sendChunksSequentially, SESSION_ADD_NOTES_PER_DATAGRAM } from "./note-chunks.js";
 import { sceneIndexSchema, tempoSchema, trackIndexSchema, validateNotes } from "./validation.js";
@@ -136,7 +137,18 @@ export class AbletonCommands {
     }
     try {
       const reply = await this.live.query("/live/clip/get/notes", [oscInt(trackIndex), oscInt(sceneIndex)]);
-      const data = { trackIndex, sceneIndex, noteCountRequested: valid.length, chunks: chunks.length, chunkNoteCounts: chunks.map(chunk => chunk.length), notesReply: reply.args };
+      // The reply is track, scene, then pitch, start, duration, velocity, mute per note (no ids).
+      const body = reply.args.slice(2);
+      const actual = [];
+      for (let offset = 0; offset + 4 < body.length; offset += 5) {
+        actual.push({ noteId: offset / 5, pitch: Number(body[offset]), startTime: Number(body[offset + 1]), duration: Number(body[offset + 2]), velocity: Number(body[offset + 3]), mute: body[offset + 4] === true });
+      }
+      try { verifyAddedNotes(valid, actual, `the clip at track ${trackIndex}, scene ${sceneIndex}`); } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await this.logger.write({ tool: "add_midi_notes", args: logged, durationMs: performance.now() - started, success: false, error: message });
+        return { ok: false, dryRun: false, tool: "add_midi_notes", error: { code: "NOTE_VERIFICATION_FAILED", message } };
+      }
+      const data = { trackIndex, sceneIndex, noteCountRequested: valid.length, noteCountInClip: actual.length, chunks: chunks.length, chunkNoteCounts: chunks.map(chunk => chunk.length), notesReply: reply.args };
       await this.logger.write({ tool: "add_midi_notes", args: logged, liveOperation: operations, response: data, durationMs: performance.now() - started, success: true });
       return { ok: true, dryRun: false, tool: "add_midi_notes", data };
     } catch (error) {

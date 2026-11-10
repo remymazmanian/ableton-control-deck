@@ -27,13 +27,21 @@ describe("Live-control construction and errors", () => {
     expect((failed.error?.details as { notesLanded: number }).notesLanded).toBeGreaterThan(0);
     expect((failed.error?.details as { notesLanded: number }).notesLanded).toBeLessThan(400);
 
-    const okFake = { send: vi.fn(), query: vi.fn().mockResolvedValue({ address: "/live/clip/get/notes", args: [0, 0] }) };
+    const readBack = [0, 0, ...notes.flatMap(note => [note.pitch, note.startTime, note.duration, note.velocity, false])];
+    const okFake = { send: vi.fn(), query: vi.fn().mockResolvedValue({ address: "/live/clip/get/notes", args: readBack }) };
     const result = await new AbletonCommands(okFake as never, { write: vi.fn() } as never).addMidiNotes(0, 0, notes);
-    expect(result.ok).toBe(true);
+    expect(result).toMatchObject({ ok: true, data: { noteCountRequested: 400, noteCountInClip: 400 } });
     expect(okFake.send.mock.calls.length).toBeGreaterThan(1);
     const pitches = okFake.send.mock.calls.flatMap(call => (call[1] as Array<{ value?: number } | boolean>).filter((_value, index) => index >= 2 && (index - 2) % 5 === 0).map(value => (value as { value: number }).value));
     expect(pitches).toEqual(notes.map(() => 60));
     expect(okFake.query).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails add_midi_notes when a requested note is missing from the read-back", async () => {
+    const notes = [{ pitch: 60, startTime: 0, duration: 1, velocity: 100 }, { pitch: 64, startTime: 1, duration: 1, velocity: 90 }];
+    const fake = { send: vi.fn(), query: vi.fn().mockResolvedValue({ args: [0, 0, 60, 0, 1, 100, false] }) };
+    const result = await new AbletonCommands(fake as never, { write: vi.fn() } as never).addMidiNotes(0, 0, notes);
+    expect(result).toMatchObject({ ok: false, error: { code: "NOTE_VERIFICATION_FAILED", message: expect.stringMatching(/1 of 2 requested notes are not in the clip at track 0, scene 0.*pitch 64 at 1/) } });
   });
 
   it("returns structured failures", async () => {
