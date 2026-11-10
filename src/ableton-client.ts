@@ -217,6 +217,7 @@ export function parseBridgeDatagram(message: Buffer): BridgeResponse | BridgeChu
   return parsed;
 }
 
-function unwrapArgument(value: OscArgument): string | number | boolean {
+function unwrapArgument(value: OscArgument): string | number | boolean | null {
+  if (value === null) return null;
   return typeof value === "object" ? (value as OscTypedNumber).value : value;
 }

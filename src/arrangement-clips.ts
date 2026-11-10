@@ -102,24 +102,7 @@ export function parseArrangementNotes(args: readonly unknown[], expected: { trac
   if (trackIndex !== expected.trackIndex || clipIndex !== expected.clipIndex) {
     throw new Error(`Note reply was addressed to track ${trackIndex} clip ${clipIndex}, not track ${expected.trackIndex} clip ${expected.clipIndex}.`);
   }
-  const body = args.slice(NOTE_HEADER);
-  if (body.length % NOTE_FIELDS !== 0) throw new Error("Arrangement note reply is not groups of pitch, start, duration, velocity, mute, and note id.");
-  const notes: ArrangementNote[] = [];
-  for (let offset = 0; offset < body.length; offset += NOTE_FIELDS) {
-    const pitch = wholeNumber(body[offset], "pitch");
-    if (pitch < 0 || pitch > 127) throw new Error(`Arrangement note pitch ${pitch} is outside 0-127.`);
-    const noteId = wholeNumber(body[offset + 5], "note id");
-    if (noteId < 0) throw new Error("Note id must be a non-negative integer.");
-    notes.push({
-      noteId,
-      pitch,
-      startTime: finiteNumber(body[offset + 1], "note start"),
-      duration: finiteNumber(body[offset + 2], "note duration"),
-      velocity: finiteNumber(body[offset + 3], "velocity"),
-      mute: muteFlag(body[offset + 4])
-    });
-  }
-  notes.sort((left, right) => left.startTime - right.startTime || left.pitch - right.pitch || left.noteId - right.noteId);
+  const notes = parseNoteBody(args.slice(NOTE_HEADER), "Arrangement");
   return {
     trackIndex,
     clipIndex,
@@ -202,4 +185,26 @@ function finiteNumber(value: unknown, label: string): number {
 function clipKind(value: unknown): ArrangementClipDescriptor["kind"] {
   if (value === "midi" || value === "audio" || value === "unknown") return value;
   throw new Error(`Unexpected arrangement clip type '${String(value)}'.`);
+}
+
+/** Parse groups of pitch, start, duration, velocity, mute, and note id, sorted by time then pitch. */
+export function parseNoteBody(body: readonly unknown[], label: string): ArrangementNote[] {
+  if (body.length % NOTE_FIELDS !== 0) throw new Error(`${label} note reply is not groups of pitch, start, duration, velocity, mute, and note id.`);
+  const notes: ArrangementNote[] = [];
+  for (let offset = 0; offset < body.length; offset += NOTE_FIELDS) {
+    const pitch = wholeNumber(body[offset], "pitch");
+    if (pitch < 0 || pitch > 127) throw new Error(`${label} note pitch ${pitch} is outside 0-127.`);
+    const noteId = wholeNumber(body[offset + 5], "note id");
+    if (noteId < 0) throw new Error("Note id must be a non-negative integer.");
+    notes.push({
+      noteId,
+      pitch,
+      startTime: finiteNumber(body[offset + 1], "note start"),
+      duration: finiteNumber(body[offset + 2], "note duration"),
+      velocity: finiteNumber(body[offset + 3], "velocity"),
+      mute: muteFlag(body[offset + 4])
+    });
+  }
+  notes.sort((left, right) => left.startTime - right.startTime || left.pitch - right.pitch || left.noteId - right.noteId);
+  return notes;
 }

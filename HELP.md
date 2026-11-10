@@ -135,11 +135,74 @@ All tools follow the same contract: **exact targets** (mutations require indices
 - **create_midi_track / create_audio_track** — Create a track at an index (`-1` appends).
 - **rename_track** — Rename a track selected by explicit index.
 - **delete_track** — Delete a track by explicit index; `confirm: true` is mandatory except in dry-run mode.
-- **list_scenes** — List Session View scenes with explicit indices.
+- **list_scenes** — List Session View scenes with index, name, color, scene tempo and time signature (`null` when off), and whether each is triggered.
 - **list_clips** — List Session View clips, optionally restricted to one track.
 - **get_selected_track / get_selected_clip** — The current selection, refused politely when it isn't a regular track/clip.
 - **create_midi_clip** — Create a Session View MIDI clip with an exact beat length.
 - **add_midi_notes** — Validate and add MIDI notes to a Session View clip. Pitches accept integers or Ableton-style note names (`C3` is MIDI 60).
+- **duplicate_track** — Duplicate a track with its devices and clips. The copy goes right after it.
+- **get_track_routing** — A track's current input and output routing, and the exact names Live offers for each.
+- **set_track** — Set a track's color, fold or unfold a group track, and set input and output routing by those exact names. An unknown routing name lists the choices and leaves the track unchanged. A channel is looked up after its new type is set, so if it is refused the type and every other change in the call are put back.
+
+### Mixer
+
+Mixer tools take `trackKind` (`track`, `return`, or `master`, default `track`) with `trackIndex` and the current `expectedTrackName`. The master track is index 0.
+
+- **get_mixer** — Volume (Live's 0–1 value plus the dB Live displays), pan, mute, solo, arm, and each send with the return track it feeds. With no arguments it reads every track, every return track, and the master.
+- **set_track_mix** — Set any of `volumeDb` (or `volume` as Live's 0–1 value), `pan` (−1 left to 1 right), `mute`, `solo`, `arm`, and `sends` in one call. `volumeDb` (up to +6) and send `db` (up to 0) accept `"-inf"`. A return track cannot send to itself. Every value is checked before any is applied, the whole change is one undo step, and the result shows the mix before and after. Live's exclusive solo and arm preferences apply only to clicks in Live, so soloing one track this way leaves other solos alone.
+
+Live does not publish its fader curve. To set a dB value, the bridge searches the fader for the value whose display reads that dB, so the result matches what Live shows to its 0.1 dB display.
+
+Return tracks:
+
+- **create_return_track** — Add a return track at the end, optionally named. Every track gets a send to it at −inf dB. Live allows 12. Live adds the return's letter to its name, so `Plate` reads back as `C-Plate`; use that full name with the other tools.
+- **delete_return_track** — Delete a return track by index and current name (with its letter, such as `C-Plate`); needs `confirm: true`. Every track loses its send to it, and the returns after it move up a letter.
+
+### Session launching
+
+- **get_session_playback** — Which clip each track is playing or has queued, which tracks are stopping, and which scenes are triggered.
+- **fire_clip** — Launch a Session clip by track, scene, and the current track and clip names. Launch follows the clip's quantization, and Live starts the transport if it is stopped. The result says whether the clip is queued or playing. An empty slot is refused.
+- **stop_track_clips** — Stop one track's Session clips, with launch quantization.
+- **fire_scene** — Launch a scene by index and current name (use `""` for an unnamed scene). If no track shows a clip from that scene, the call still succeeds and says so, because an empty scene launches nothing a read-back can see. As with clicking a scene in Live, every track joins in: a track with an empty slot in that scene stops what it was playing, unless the slot's stop button was removed.
+- **stop_all_clips** — Stop every Session clip; `quantized: false` stops them at once.
+
+### Scenes
+
+- **create_scene** — Create a scene at an index (`-1` appends), optionally named.
+- **duplicate_scene** — Duplicate a scene and its clips; the copy goes right after it.
+- **delete_scene** — Delete a scene and its clips; needs `confirm: true`. The last scene is refused, because Live needs one.
+- **set_scene** — Rename, recolor, or set a scene's tempo and time signature. `null` turns the scene tempo or time signature off.
+
+### Loading samples
+
+Each tool takes `sampleId` from `search_samples` or an absolute `path` to a `.wav`, `.aif`, `.aiff`, `.mp3`, or `.flac` file, and needs Live 12. Live reads the file where it is; Control Deck never copies, moves, or changes it. A symlink must point to an audio file.
+
+- **load_sample_to_clip_slot** — Load a sample into an empty Session slot on an audio track, optionally naming the clip. The new clip is read back, and the call fails if it plays a different file than the one asked for.
+- **load_sample_to_arrangement** — Load a sample onto an audio track's Arrangement at a beat position (0 to 1,576,800). A start inside an existing clip is refused. A sample's length in beats is only known once Live loads it, and Live trims any clip the new one overlaps, so if that happens the tool undoes its own load (one undo step), confirms the track is back as it was, and reports the clip it would have overlapped.
+- **replace_simpler_sample** — Replace the sample in a Simpler device, by track and device index and their current names. The result shows the previous file and the new one. Asking for the file Simpler already plays is refused, since there is nothing to change.
+
+Live names an untitled track after the first clip or sample it gets (`3-Audio` becomes `3-Kick`), and names Simpler after its sample. Each result gives the current track name (and device name for Simpler) and says when Live changed it, so use those names in the next call.
+
+### Session clip properties
+
+- **get_clip** — A Session clip's name, color, loop on/off, loop start and end, start and end markers, launch mode and quantization, legato, and mute. Audio clips add gain, transpose, detune, warping, and warp mode.
+- **set_clip** — Change any of those in one undo step, by track, scene, and the current track and clip names. Loop and marker moves are ordered so Live accepts them in either direction. Audio-only settings on a MIDI clip, and a single loop or marker value that would cross the other end, are refused before anything changes. If Live still refuses a value partway through, the call puts back what it changed. Every value is read back. If Live changes a setting you did not ask for, the result lists it in `alsoChangedByLive`. For example, turning warping off also turns looping off and moves the loop end, and turning warping back on does not restore them.
+- **duplicate_clip** — Copy a Session clip into an empty slot on a track of the same type. An occupied slot or a MIDI-to-audio copy is refused.
+- **delete_clip** — Delete a Session clip; needs `confirm: true`.
+- **get_clip_notes** — The notes in a Session MIDI clip, each with the note id that `modify_clip_notes` needs.
+- **modify_clip_notes** — Change notes by id: pitch (number or name such as `E1`), start, duration, velocity, or mute. Fields you leave out stay as they are. Every change is read back.
+- **remove_clip_notes** — Remove the notes whose start lies in a pitch and time range. The end of each range is exclusive. The result lists the removed note ids.
+
+Together with `add_midi_notes`, these give Session clips the same note editing as Arrangement clips.
+
+Colors are hex RGB such as `#FF8800`. Live snaps a color to its own palette, so `set_clip`, `set_track`, and `set_scene` report the color Live chose and `colorSnapped: true` when it differs from the one asked for (for example, `#34C759` becomes `#539F31`).
+
+### Undo
+
+Each command Control Deck sends to Live is wrapped in one Live undo step, so one Cmd-Z reverts it even when it changed several values. Nearly every tool sends one command. Two send two and take two undos: `set_time_signature` (numerator, then denominator) and `add_locator` (create, then name). Play, stop, and playhead moves add no undo steps.
+
+- **get_undo_state** — Whether Live can undo or redo.
+- **undo / redo** — Step Live's history back or forward. Live keeps one history for the whole set, so the most recent step may be a change made by hand. Read back the affected state afterwards.
 
 ### Arrangement
 
@@ -341,6 +404,7 @@ Then delete the install folder, remove the wrapper app from `/Applications` if y
 ## Known limitations
 
 - **Read-back proves the observable result, not internals.** Mutations get correlated acknowledgements plus a separate read-back query, but a read-back cannot prove every internal detail atomically.
+- **Undo is Live's own history.** `undo` reverts Live's most recent step, whoever made it. Grouping a change into one undo step needs `Song.begin_undo_step`; on a Live without it, a multi-value change still applies but may take more than one undo.
 - **Track identity is index-plus-name.** Indices shift when tracks are inserted or deleted, which is exactly why every mutation also requires the current name.
 - **Device traversal covers top-level track devices**, not devices nested inside racks.
 - **No proprietary plug-in UI control.** Control Deck can instantiate plug-ins and set the parameters they expose; it cannot manipulate vendor UIs or parameters kept hidden from Live (OmniHost exists to widen that surface for one hosted instrument).

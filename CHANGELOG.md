@@ -4,10 +4,53 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+Mixer control and return tracks, Session launching, scenes, clip properties and notes, undo, and track routing. Tested with Ableton Live 12.4.16. After updating, run `npm run setup` and restart Live so it loads the new remote script, which adds `session_ops.py`.
+
+In Live 12.4.16 these all passed:
+- dB volume at -6, -18.5, +6, and -inf, with +12 refused
+- pan, mute, solo, arm, and a send
+- return track mute, and master volume
+- one undo reverting a three-value mix change, and redo reapplying it
+- scene create, color, tempo, 7/8, rename, duplicate, and delete
+- MIDI clip name, color, launch mode and quantization, legato, loop moves in both directions, markers, looping, and mute
+- clip duplicate, plus refusal of an occupied slot
+- clip and scene launch, stopping one track, and stopping all
+- track color, input and output routing by name, and duplicate track
+- refusal of stale names and missing confirmation
+- play, stop, continue, and playhead moves leave no empty undo steps, so one undo after them still reverts the last real change
+- audio clip gain (shown as Live's dB display), transpose from -12 to +7, detune, every warp mode tried (complex, re-pitch, texture, beats), and warping off, with out-of-range gain and transpose refused
+- folding and unfolding a group track, with folding a non-group track refused
+- sample loading: into a Session slot (with and without a clip name), onto the Arrangement, and into an empty and a loaded Simpler; refusal of an occupied slot, a MIDI track, a start inside a clip, and a stale device name; a sample that would cover an existing clip undone with the clip restored; and Live's renaming of the track and Simpler after the sample reported
+- Session clip notes: read with ids, change by id (pitch by name, velocity, length), remove a range, one undo restoring removed notes, and refusal of an unknown id, a stale clip name, and an empty range
+- return tracks: create with a name (Live reads it back with its letter, such as `C-CD Return`), a send added to every track, delete with confirmation, and the later returns moving up a letter
+
+Still unchecked: REX and Complex Pro warp modes, and tracks nested more than one group deep.
+
 ### Added
 
+- `get_mixer` and `set_track_mix` read and set volume, pan, mute, solo, arm, and sends on tracks, return tracks, and the master. Volume and sends take dB, which the bridge matches to Live's own display. All changes in one call are checked before any is applied.
+- `fire_clip`, `stop_track_clips`, `fire_scene`, `stop_all_clips`, and `get_session_playback` launch and stop Session clips and scenes, and read back whether each is queued, playing, or stopping.
+- `create_scene`, `duplicate_scene`, `delete_scene`, and `set_scene` manage scenes, including scene tempo and time signature. Deleting needs `confirm: true`, and the last scene is refused.
+- `get_clip` and `set_clip` read and change Session clip loop, markers, launch mode and quantization, legato, mute, color, and audio gain, transpose, detune, and warp. `duplicate_clip` copies into an empty slot of a matching track. `delete_clip` needs `confirm: true`.
+- `get_clip_notes`, `modify_clip_notes`, and `remove_clip_notes` read and edit notes in Session MIDI clips by note id, matching the Arrangement note tools.
+- `load_sample_to_clip_slot`, `load_sample_to_arrangement`, and `replace_simpler_sample` load an audio file, by `sampleId` from `search_samples` or by path, into a Session slot, the Arrangement, or a Simpler device. A load that would trim an existing Arrangement clip is undone and refused. Needs Live 12.
+- `get_clip` shows an audio clip's file.
+- `create_return_track` and `delete_return_track`. Deleting needs `confirm: true`.
+- `undo`, `redo`, and `get_undo_state`. The result warns that Live's most recent step may be a change made by hand.
+- `get_track_routing`, `set_track`, and `duplicate_track` set track color, fold group tracks, set input and output routing by exact name, and duplicate a track.
+- `set_clip`, `set_track`, and `set_scene` return `colorSnapped: true` when Live snaps the requested color to a different palette color.
+- `set_clip` lists any setting Live changed on its own in `alsoChangedByLive`. Turning warping off makes Live turn looping off and move the loop end. It also names the valid choices when a launch mode, quantization, or warp mode is unknown.
 - The local dashboard shows a quiet footer on every page with the version, “Built by Remy Mazmanian”, and a link to remymazmanian.com.
 - The MCP server, the local status service, and the dashboard footer read their version from the root `package.json`. A check fails if the remote script, the macOS wrapper, the dashboard package, or the documented bridge log line disagree with that version.
+
+### Changed
+
+- Bridge errors for a missing track, scene, device, or parameter now name the index.
+- Dry runs of `set_track_mix` and `set_clip` now report what the real call would refuse: a send or field the track lacks, volume above +6 dB or a send above 0 dB, arming a track that cannot be armed, and audio-only settings on a MIDI clip.
+- `set_track` and `set_clip` put back what they changed when Live refuses a value partway through, such as a routing channel that does not exist for the new routing type.
+- A return track can no longer be set to send to itself.
+- Every bridge mutation now runs inside one Live undo step (`Song.begin_undo_step` / `end_undo_step`), so one Cmd-Z reverts one Control Deck command. `set_time_signature` and `add_locator` send two commands and take two undos. Undo and redo themselves are not wrapped.
+- `list_scenes` adds each scene's color, tempo, time signature, and triggered state. With an older installed remote script it falls back to names and says to rerun setup.
 
 ## [1.2.0] - 2026-10-31
 
