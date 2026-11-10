@@ -256,7 +256,18 @@ That removes notes of pitch 60 (C3) whose start is in the half-open beat range `
 - **get_devices** — List the top-level devices on a track, return track, or the master, with each one's index, name, type, and whether it is on (`null` for a device with no on/off switch).
 - **set_device_enabled** — Turn a device on or off with its Device On switch, by track and device index and their current names. The state is read back.
 - **delete_device** — Delete a top-level device, by track and device index and their current names; needs `confirm: true`. The remaining chain is read back. Devices inside racks are not reached.
-- **get_device_parameters / list_device_parameters** — List every parameter Live exposes for a specific device.
+
+### Racks and drum pads
+
+A device is addressed by a path. `"0"` is the first device on the track. `"0/2/1"` is device 1 in chain 2 of the rack at device 0, and a path can go seven racks deep. `get_rack` lists every device in a rack with its path, so read that first. Every change checks the track, the rack or device, and the chain or pad by index and current name.
+
+- **get_rack** — A rack's chains and the devices in them (with paths), its visible macros with values as Live shows them, its macro variations, and, for a Drum Rack, every pad that holds a sound.
+- **get_device_parameters_at_path** — Every parameter of the device at a path, including inside racks, with value, range, and display.
+- **set_device_parameter_at_path** — Set one parameter of the device at a path by index and current parameter name, and read it back. Parameter 0 is usually Device On, so this also turns a device inside a rack on or off.
+- **set_rack_macros** — Set macros 1–16 in one undo step. Each value is checked against that macro's range (usually 0–127) before any is set, and the result shows what Live displays.
+- **set_rack_chain** — Rename, mute, or solo a chain.
+- **set_drum_pad** — Mute or solo a Drum Rack pad by note (a number or a name such as `C1`) and current pad name. Only pads that hold a sound are listed and can be changed.
+- **rack_variation** — Store the current macros as a new variation, recall or delete one by index, or randomize the macros. Deleting needs `confirm: true`. Needs Live 11 or newer.- **get_device_parameters / list_device_parameters** — List every parameter Live exposes for a specific device.
 - **set_device_parameter** — Set an exposed parameter using stable indices and a required expected-device-name safeguard.
 - **list_plugin_devices** — List loaded third-party plug-in devices, optionally restricted to one track.
 - **get_plugin_parameters** — List the controllable parameters of an exact loaded third-party plug-in.
@@ -270,8 +281,8 @@ That removes notes of pitch 60 (C3) whose start is in the half-open beat range `
 - **find_plugin** — Resolve the exact Live Browser path that would be loaded for a plug-in name and format.
 - **refresh_plugin_index** — Rebuild the bridge's plug-in index from Live's current Browser state.
 - **load_plugin / load_plugin_on_track** — Load a resolved plug-in on an explicit track and verify the device chain grew. Requires the track's current name; an exact resolved path disambiguates duplicates.
-- **find_live_device** — Resolve the exact Browser path for a native Live device from the Instruments, Audio Effects, MIDI Effects, or Drums categories.
-- **load_live_device** — Load a native Live device (Drum Rack, Echo, Reverb, ...) on an explicit track through Live's Browser, refusing ambiguous names and verifying the device chain.
+- **find_live_device** — Resolve the exact Browser path for a native Live device or factory preset from the Instruments, Audio Effects, MIDI Effects, or Drums categories. Presets such as kits and racks can be named with or without their extension (`Strutter Kit` or `Strutter Kit.adg`); an exact name wins, so `Drift` is still the device.
+- **load_live_device** — Load a native Live device or factory preset (Drum Rack, Echo, a kit such as Strutter Kit, an effect rack such as Drum Buss Grand, ...) on an explicit track through Live's Browser, refusing ambiguous names and verifying the device chain.
 - **load_user_library_item** — Load a User Library item onto an exact track by its exact Browser name, then read the device chain back. This is how a saved Instrument Rack (`.adg`) or device preset (`.adv`) is loaded, including a rack that holds Pigments or Serum 2 with a patch. If more than one item has that name, the call fails and returns the Browser paths. Pass one of those paths as `path` to choose. `path` is a Live Browser path such as `User Library/Presets/Instruments/My Serum Rack`, not a file on disk.
 
 ```json
@@ -411,7 +422,7 @@ Then delete the install folder, remove the wrapper app from `/Applications` if y
 - **Read-back proves the observable result, not internals.** Mutations get correlated acknowledgements plus a separate read-back query, but a read-back cannot prove every internal detail atomically.
 - **Undo is Live's own history.** `undo` reverts Live's most recent step, whoever made it. Grouping a change into one undo step needs `Song.begin_undo_step`; on a Live without it, a multi-value change still applies but may take more than one undo.
 - **Track identity is index-plus-name.** Indices shift when tracks are inserted or deleted, which is exactly why every mutation also requires the current name.
-- **Device traversal covers top-level track devices**, not devices nested inside racks.
+- **Device on/off and delete tools work on top-level devices.** Inside racks, use `set_device_parameter_at_path` (parameter 0 is Device On). Deleting or moving a device inside a rack, and adding a chain, are not available.
 - **No proprietary plug-in UI control.** Control Deck can instantiate plug-ins and set the parameters they expose; it cannot manipulate vendor UIs or parameters kept hidden from Live (OmniHost exists to widen that surface for one hosted instrument).
 - **Native device loading covers devices, not factory preset browsers.** `load_live_device` resolves items under Instruments, Audio Effects, MIDI Effects, and Drums by exact name and refuses fuzzy matches. A saved User Library rack is a separate tool, `load_user_library_item`.
 - **Arrangement MIDI clips can be created on Live 12.1.10 and newer.** `create_arrangement_midi_clip` calls `Track.create_midi_clip(start_time, length)` and reads the clip back. Older Live versions fail by name. Session clips can still be copied into the Arrangement with `place_clip_in_arrangement`.

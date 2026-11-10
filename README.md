@@ -39,6 +39,7 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 - Read, change, and remove notes in Session clips by note id
 - Load samples from your sample index, or any audio file, into a Session slot, the Arrangement, or Simpler
 - Turn devices on and off, and delete them with confirmation
+- Reach into racks: set macros, store and recall macro variations, rename, mute, and solo chains, mute and solo drum pads, and set any parameter of a device inside a rack
 - Launch and stop Session clips and scenes, and see what is playing or queued
 - Create, duplicate, rename, recolor, and delete scenes, with per-scene tempo and time signature
 - Session clip properties: loop, markers, launch mode and quantization, color, mute, and audio gain, transpose, and warp; duplicate a clip to an empty slot or delete it with confirmation

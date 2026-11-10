@@ -4,11 +4,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
-In Live 12.4.16 these passed: selecting a return track, the master, and a track with a scene; refusal of a stale track name and a missing scene; `get_live_set` with a return track selected; and no undo step added by selecting.
+In Live 12.4.16 these passed, on Strutter Kit (a Drum Rack inside an Instrument Rack) and Drum Buss Grand: muting and soloing pads in the nested Drum Rack; renaming and muting a chain; an outer macro; a parameter on a device three racks deep (path `0/0/0/0/0`); recalling, storing, deleting, and randomizing variations; refusal of a stale pad name and a non-rack path; and every rack read back exactly as it started. Also: selecting a return track, the master, and a track with a scene; refusal of a stale track name and a missing scene; `get_live_set` with a return track selected; and no undo step added by selecting.
 
 ### Added
 
 - `get_selection` reads the selected track (including a return track or the master), scene, and clip. `select` selects a track, a scene, or both by index and current name and reads the selection back. Selecting is not an undo step.
+
+- Racks: `get_rack`, `get_device_parameters_at_path`, `set_device_parameter_at_path`, `set_rack_macros`, `set_rack_chain`, `set_drum_pad`, and `rack_variation`. A device inside a rack is addressed by a path such as `0/2/1`, and every change checks the names along the way and reads the result back.
+
+### Changed
+
+- `find_live_device` and `load_live_device` find factory presets such as kits and effect racks without their file extension (`Strutter Kit` as well as `Strutter Kit.adg`). An exact name still wins, so `Drift` is the device.
 
 ### Fixed
 

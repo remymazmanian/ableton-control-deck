@@ -7,6 +7,7 @@ allowlist, and every mutation checks the target's current name first.
 import re
 
 from .bridge_core import BridgeError
+from .rack_ops import RACK_COMMANDS, RACK_QUERIES, RackOps
 
 
 MAX_NAME = 128
@@ -41,7 +42,7 @@ SESSION_QUERIES = (
     "/live/device/get/sample",
     "/live/devices/get/state",
     "/live/view/get/selection",
-)
+) + RACK_QUERIES
 SESSION_COMMANDS = (
     "/live/mixer/set",
     "/live/clip_slot/fire",
@@ -69,7 +70,7 @@ SESSION_COMMANDS = (
     "/live/device/set_enabled",
     "/live/device/delete",
     "/live/view/select",
-)
+) + RACK_COMMANDS
 # Undo and redo move through Live's history, so they must not open a step of their own.
 # Same limit as Control_Deck.MAX_ARRANGEMENT_BEATS (importing it here would be circular).
 MAX_ARRANGEMENT_BEATS = 1576800.0
@@ -78,7 +79,7 @@ SAMPLE_EXTENSIONS = (".wav", ".aif", ".aiff", ".mp3", ".flac")
 NO_UNDO_STEP = ("/live/song/undo", "/live/song/redo", "/live/view/select")
 
 
-class SessionOps(object):
+class SessionOps(RackOps):
     # ------------------------------------------------------------------ dispatch
 
     def _session_query(self, address, args):
@@ -109,6 +110,8 @@ class SessionOps(object):
             return self._devices_state(args)
         if address == "/live/view/get/selection":
             return self._selection()
+        if address in RACK_QUERIES:
+            return self._rack_query(address, args)
         raise BridgeError("ADDRESS_NOT_ALLOWED", "Unsupported Live query: %s" % address)
 
     def _session_command(self, address, args):
@@ -140,6 +143,8 @@ class SessionOps(object):
             "/live/device/delete": self._delete_device,
             "/live/view/select": self._select,
         }
+        if address in RACK_COMMANDS:
+            return self._rack_command(address, args)
         handler = handlers.get(address)
         if handler is None:
             raise BridgeError("ADDRESS_NOT_ALLOWED", "Unsupported Live mutation: %s" % address)

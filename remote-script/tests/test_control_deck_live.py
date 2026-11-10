@@ -403,6 +403,19 @@ class ControlDeckLiveTests(unittest.TestCase):
         disambiguated = self.bridge._resolve_browser_item({"name": "Echo", "path": "Audio Effects/Echo"})[0]
         self.assertEqual(disambiguated["path"], "Audio Effects/Echo")
 
+    def test_finds_a_preset_without_its_extension_but_prefers_an_exact_name(self):
+        kit = types.SimpleNamespace(name="Strutter Kit.adg", children=[], is_loadable=True)
+        drift = types.SimpleNamespace(name="Drift", children=[], is_loadable=True)
+        drift_preset = types.SimpleNamespace(name="Drift.adv", children=[], is_loadable=True)
+        drums = types.SimpleNamespace(name="Drums", children=[kit], is_loadable=False)
+        instruments = types.SimpleNamespace(name="Instruments", children=[drift, types.SimpleNamespace(name="Drift", children=[drift_preset], is_loadable=False)], is_loadable=False)
+        browser = types.SimpleNamespace(instruments=instruments, audio_effects=None, midi_effects=None, drums=drums, load_item=lambda value: None)
+        self.bridge.application = lambda: types.SimpleNamespace(browser=browser)
+        self.assertEqual(self.bridge._resolve_browser_item({"name": "Strutter Kit"})[1], kit)
+        self.assertEqual(self.bridge._resolve_browser_item({"name": "Strutter Kit.adg"})[1], kit)
+        # "Drift" is the device; the Drift.adv preset only matches when nothing is named exactly Drift.
+        self.assertEqual(self.bridge._resolve_browser_item({"name": "Drift"})[1], drift)
+
     def test_loads_an_exact_user_library_device_on_a_safeguarded_track(self):
         item = types.SimpleNamespace(name="Control Deck OmniHost", children=[], is_loadable=True)
         folder = types.SimpleNamespace(name="Control Deck", children=[item], is_loadable=False)
