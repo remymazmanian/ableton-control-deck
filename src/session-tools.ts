@@ -639,6 +639,8 @@ export class SessionTools {
       const before = await this.clipProps(input.trackIndex, input.sceneIndex);
       const audioOnly = requested.map(([field]) => field).filter(field => ["gain", "pitch_coarse", "pitch_fine", "warping", "warp_mode"].includes(field));
       if (audioOnly.length && before.kind !== "audio") throw new Error(`${audioOnly.join(", ")} ${audioOnly.length === 1 ? "applies" : "apply"} only to audio clips; this clip is ${String(before.kind)}.`);
+      // Live ignores looping on an unwarped audio clip, so say why rather than fail the read-back.
+      if (before.kind === "audio" && input.looping === true && (input.warping ?? before.props.warping) === false) throw new Error("Live only loops a warped audio clip. Set warping: true in the same call, or turn warping on first.");
       return { address: "/live/clip/set", args: [...this.clipArgs(input), ...requested.flatMap(([field, value]) => [field, value])], before };
     }, async before => {
       const after = await this.clipProps(input.trackIndex, input.sceneIndex);

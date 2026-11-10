@@ -4,16 +4,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+Meters were calibrated in Live 12.4.16 with 1 kHz tones at 0, −6, −12, −18, −24, and −36 dBFS. A mix check on a planted mix flagged all four problems: a 0 dBFS tone with its fader at +4 dB peaking at +4.0 dB, a MIDI track with no instrument playing a clip, a −24 dBFS tone panned hard left (reading −21 dB, from the +3 dB pan law), and the same track sitting 25 dB below the loudest. It also refused to run while Live was stopped.
+
 In Live 12.4.16 these passed, on Strutter Kit (a Drum Rack inside an Instrument Rack) and Drum Buss Grand: muting and soloing pads in the nested Drum Rack; renaming and muting a chain; an outer macro; a parameter on a device three racks deep (path `0/0/0/0/0`); recalling, storing, deleting, and randomizing variations; refusal of a stale pad name and a non-rack path; and every rack read back exactly as it started. Also: selecting a return track, the master, and a track with a scene; refusal of a stale track name and a missing scene; `get_live_set` with a return track selected; and no undo step added by selecting.
 
 ### Added
 
 - `get_selection` reads the selected track (including a return track or the master), scene, and clip. `select` selects a track, a scene, or both by index and current name and reads the selection back. Selecting is not an undo step.
 
+- `get_meters` reads every track's, return track's, and the master's level in dB. `mix_check` samples the meters while Live plays and flags clipping, low master headroom, a track playing a clip with no sound, lopsided panning, and tracks buried 24 dB or more below the loudest. Meter values are converted with a calibration measured in Live 12.4.16.
 - Racks: `get_rack`, `get_device_parameters_at_path`, `set_device_parameter_at_path`, `set_rack_macros`, `set_rack_chain`, `set_drum_pad`, and `rack_variation`. A device inside a rack is addressed by a path such as `0/2/1`, and every change checks the names along the way and reads the result back.
 
 ### Changed
 
+- `set_clip` refuses `looping: true` on an unwarped audio clip unless the same call turns warping on. Live ignores looping on an unwarped clip, which used to surface as a failed read-back.
 - `find_live_device` and `load_live_device` find factory presets such as kits and effect racks without their file extension (`Strutter Kit` as well as `Strutter Kit.adg`). An exact name still wins, so `Drift` is the device.
 
 ### Fixed

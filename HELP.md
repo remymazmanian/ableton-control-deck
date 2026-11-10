@@ -160,6 +160,20 @@ Return tracks:
 - **create_return_track** — Add a return track at the end, optionally named. Every track gets a send to it at −inf dB. Live allows 12. Live adds the return's letter to its name, so `Plate` reads back as `C-Plate`; use that full name with the other tools.
 - **delete_return_track** — Delete a return track by index and current name (with its letter, such as `C-Plate`); needs `confirm: true`. Every track loses its send to it, and the returns after it move up a letter.
 
+### Meters and mix check
+
+Live's output meters read 0 to 1 on a scale that is linear in dB. Control Deck converts them using a calibration made in Live 12.4.16 with test tones at 0, −6, −12, −18, −24, and −36 dBFS: 0 dBFS reads 0.921, each dB is 0.0132, so the top of the meter is about +6 dB and the bottom about −70 dB. The meter moves in steps of about 1.5 dB, so levels are that precise and no more. Meters read silence while Live is stopped.
+
+- **get_meters** — Every track's, return track's, and the master's level right now: left, right, and peak in dB.
+- **mix_check** — Sample the meters every 50 ms while Live plays (4 seconds by default, up to 30), then report each track's peak and average level and flag:
+  - anything over 0 dBFS (a problem),
+  - a master with less than 1 dB of headroom,
+  - a track that is playing a clip but makes no sound,
+  - a track leaning 6 dB or more to one side,
+  - a track 24 dB or more below the loudest track (a note, in case it is meant to be quiet).
+
+  Start playback, or fire the clips or scene to check, first. Only what plays while it samples is checked.
+
 ### Session launching
 
 - **get_session_playback** — Which clip each track is playing or has queued, which tracks are stopping, and which scenes are triggered.
@@ -188,7 +202,7 @@ Live names an untitled track after the first clip or sample it gets (`3-Audio` b
 ### Session clip properties
 
 - **get_clip** — A Session clip's name, color, loop on/off, loop start and end, start and end markers, launch mode and quantization, legato, and mute. Audio clips add gain, transpose, detune, warping, and warp mode.
-- **set_clip** — Change any of those in one undo step, by track, scene, and the current track and clip names. Loop and marker moves are ordered so Live accepts them in either direction. Audio-only settings on a MIDI clip, and a single loop or marker value that would cross the other end, are refused before anything changes. If Live still refuses a value partway through, the call puts back what it changed. Every value is read back. If Live changes a setting you did not ask for, the result lists it in `alsoChangedByLive`. For example, turning warping off also turns looping off and moves the loop end, and turning warping back on does not restore them.
+- **set_clip** — Change any of those in one undo step, by track, scene, and the current track and clip names. Loop and marker moves are ordered so Live accepts them in either direction. Audio-only settings on a MIDI clip, and a single loop or marker value that would cross the other end, are refused before anything changes. If Live still refuses a value partway through, the call puts back what it changed. Every value is read back. If Live changes a setting you did not ask for, the result lists it in `alsoChangedByLive`. For example, turning warping off also turns looping off and moves the loop end, and turning warping back on does not restore them. Live only loops a warped audio clip, so `looping: true` on an unwarped clip needs `warping: true` in the same call.
 - **duplicate_clip** — Copy a Session clip into an empty slot on a track of the same type. An occupied slot or a MIDI-to-audio copy is refused.
 - **delete_clip** — Delete a Session clip; needs `confirm: true`.
 - **get_clip_notes** — The notes in a Session MIDI clip, each with the note id that `modify_clip_notes` needs.

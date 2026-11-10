@@ -581,6 +581,21 @@ class SessionOpsTests(unittest.TestCase):
         self.assertIn("found 'Drop'", self.refused("/live/view/select", None, 0, "", 1, "Outro"))
         self.assertIn("track, a scene", self.refused("/live/view/select", None, 0, "", -1, ""))
 
+    # ---------------------------------------------------------------- meters
+
+    def test_reads_every_meter_in_one_reply(self):
+        self.song.is_playing = True
+        drums = self.song.tracks[0]
+        drums.output_meter_left, drums.output_meter_right, drums.output_meter_level = 0.921, 0.842, 0.95
+        drums.mute = True
+        self.song.master_track.output_meter_left = 0.5
+        values = self.query("/live/meters/get")
+        self.assertEqual(values[:2], [True, 5])
+        self.assertEqual(values[2:10], ["track", 0, "Drums", 0.921, 0.842, 0.95, True, True])
+        master = values[2 + 4 * 8:]
+        self.assertEqual(master[:4], ["master", 0, "Main", 0.5])
+        self.assertEqual(self.song.undo_log, [])
+
     def test_lists_routing_options(self):
         values = self.query("/live/track/get/routing_options", "track", 0)
         self.assertEqual(values[:6], ["track", 0, "Drums", "input_routing_type", 3, "All Ins"])
