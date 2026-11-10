@@ -118,6 +118,8 @@ All tools follow the same contract: **exact targets** (mutations require indices
 - **get_live_set** — Structured overview of the Live version, transport, signature, tracks, scenes, and selection. `scenes` is the scene list, and `selection` names the selected track (including a return track or the master) and scene.
 - **get_selection** — What is selected in Live: the track (a regular track, a return track, or the master), the scene, and the clip in that slot if there is one.
 - **select** — Select a track, a scene, or both, by index and current name, and read the selection back. Selecting both highlights that clip slot. Selection changes Live's view, not the set, so it is not an undo step.
+- **get_view** — Which main view Live shows (`session` or `arrangement`), and whether the Detail view (clip editor or devices) and the Browser are showing.
+- **show_view** — Switch between the Session (clip launch) view and the Arrangement view, show the clip editor or the device chain or hide the Detail view, and show or hide the Browser, in one call. The view is read back. Like selection, it changes Live's window, not the set, so it is not an undo step.
 - **get_transport** — Playback, position, tempo, metronome, recording, and loop state.
 - **get_time_signature** — The current time signature.
 

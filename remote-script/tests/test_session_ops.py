@@ -596,6 +596,49 @@ class SessionOpsTests(unittest.TestCase):
         self.assertEqual(master[:4], ["master", 0, "Main", 0.5])
         self.assertEqual(self.song.undo_log, [])
 
+    # ---------------------------------------------------------------- application view
+
+    def app_view(self):
+        shown = {"Session"}
+        state = {"focused": "Session"}
+
+        def show(name):
+            if name in ("Session", "Arranger"):
+                shown.discard("Session"); shown.discard("Arranger")
+            if name.startswith("Detail/"):
+                shown.discard("Detail/Clip"); shown.discard("Detail/DeviceChain"); shown.add("Detail")
+            shown.add(name)
+
+        def hide(name):
+            shown.discard(name)
+            if name == "Detail":
+                shown.discard("Detail/Clip"); shown.discard("Detail/DeviceChain")
+
+        def focus(name):
+            state["focused"] = name
+
+        view = type("View", (), {"show_view": staticmethod(show), "hide_view": staticmethod(hide), "focus_view": staticmethod(focus),
+                                 "is_view_visible": staticmethod(lambda name: name in shown), "focused_document_view": property(lambda _self: state["focused"])})()
+        self.bridge.application = lambda: types.SimpleNamespace(view=view, get_major_version=lambda: 12, get_minor_version=lambda: 4, get_bugfix_version=lambda: 16)
+        return shown
+
+    def test_reads_and_switches_the_main_and_detail_views(self):
+        self.app_view()
+        self.assertEqual(self.query("/live/app_view/get"), ["session", False, False, False, False])
+        self.command("/live/app_view/show", "arrangement", "clip", True)
+        self.assertEqual(self.query("/live/app_view/get"), ["arrangement", True, True, False, True])
+        self.command("/live/app_view/show", None, "hide", False)
+        self.assertEqual(self.query("/live/app_view/get"), ["arrangement", False, False, False, False])
+        self.command("/live/app_view/show", "session", "devices", None)
+        self.assertEqual(self.query("/live/app_view/get"), ["session", True, False, True, False])
+        self.assertEqual(self.song.undo_log, [])
+
+    def test_view_refusals(self):
+        self.app_view()
+        self.assertIn("session or arrangement", self.refused("/live/app_view/show", "mixer", None, None))
+        self.assertIn("clip, devices, or hide", self.refused("/live/app_view/show", None, "notes", None))
+        self.assertIn("Choose a view", self.refused("/live/app_view/show", None, None, None))
+
     def test_lists_routing_options(self):
         values = self.query("/live/track/get/routing_options", "track", 0)
         self.assertEqual(values[:6], ["track", 0, "Drums", "input_routing_type", 3, "All Ins"])
