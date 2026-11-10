@@ -420,6 +420,16 @@ describe("sample loading", () => {
     expect(live.send).not.toHaveBeenCalled();
   });
 
+  it("refuses looping an unwarped audio clip unless warping is turned on too", async () => {
+    const live = fakeLive();
+    live.state.tracks[1].slots[0] = { name: "Take", triggered: false, playing: false, props: { name: "Take", file_path: "/take.wav", warping: false, looping: false } };
+    const tools = new SessionTools(live as never, logger as never);
+    const take = { trackIndex: 1, sceneIndex: 0, expectedTrackName: "Bass", expectedClipName: "Take" };
+    expect(await tools.setClip({ ...take, looping: true })).toMatchObject({ ok: false, error: { message: expect.stringMatching(/only loops a warped audio clip/) } });
+    expect(live.send).not.toHaveBeenCalled();
+    expect(await tools.setClip({ ...take, looping: true, warping: true })).toMatchObject({ ok: true });
+  });
+
   it("fails when the new clip plays a different file", async () => {
     const live = fakeLive();
     const send = live.send.getMockImplementation()!;

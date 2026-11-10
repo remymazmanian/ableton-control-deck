@@ -42,6 +42,7 @@ SESSION_QUERIES = (
     "/live/device/get/sample",
     "/live/devices/get/state",
     "/live/view/get/selection",
+    "/live/meters/get",
 ) + RACK_QUERIES
 SESSION_COMMANDS = (
     "/live/mixer/set",
@@ -110,6 +111,8 @@ class SessionOps(RackOps):
             return self._devices_state(args)
         if address == "/live/view/get/selection":
             return self._selection()
+        if address == "/live/meters/get":
+            return self._meters()
         if address in RACK_QUERIES:
             return self._rack_query(address, args)
         raise BridgeError("ADDRESS_NOT_ALLOWED", "Unsupported Live query: %s" % address)
@@ -1095,3 +1098,24 @@ class SessionOps(RackOps):
             view.selected_track = track
         if scene is not None:
             view.selected_scene = scene
+
+    # ------------------------------------------------------------------ meters
+
+    def _meters(self):
+        # Reply: isPlaying, count, then per track: kind, index, name, left, right, level, mute, hasAudioOutput.
+        # Live's meter values run 0-1 on its meter scale, not dB; the server converts them.
+        song = self.song()
+        rows = []
+        for kind, tracks in (("track", list(song.tracks)), ("return", list(song.return_tracks)), ("master", [song.master_track])):
+            for index, track in enumerate(tracks):
+                rows.append([
+                    kind, index, track.name,
+                    self._optional_number(track, "output_meter_left"), self._optional_number(track, "output_meter_right"),
+                    self._optional_number(track, "output_meter_level"),
+                    bool(getattr(track, "mute", False)) if kind != "master" else False,
+                    bool(getattr(track, "has_audio_output", True)),
+                ])
+        values = [bool(song.is_playing), len(rows)]
+        for row in rows:
+            values.extend(row)
+        return values

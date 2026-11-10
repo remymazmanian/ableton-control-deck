@@ -12,7 +12,7 @@ import { PluginTools } from "./plugin-tools.js";
 import { OmnihostClient } from "./omnihost-client.js";
 import { OmnihostTools } from "./omnihost-tools.js";
 import { LAUNCH_MODES, LAUNCH_QUANTIZATIONS, WARP_MODES } from "./session-tools.js";
-import { RackTools } from "./rack-tools.js";
+import { MeterTools } from "./meter-tools.js";
 import { MAX_NOTES_PER_CALL } from "./note-chunks.js";
 import { fromProjectRoot } from "./paths.js";
 
@@ -25,7 +25,7 @@ const samples = new SampleIndex();
 const local = new LocalCapabilities();
 const plugins = new PluginTools(ableton, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
 const omnihostClient = new OmnihostClient();
-const session = new RackTools(ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1", async id => String((await samples.getMetadata({ id }) as { path: string }).path));
+const session = new MeterTools(ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1", async id => String((await samples.getMetadata({ id }) as { path: string }).path));
 const omnihost = new OmnihostTools(omnihostClient, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
 const server = new McpServer({ name: "ableton-control-deck", version });
 const response = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }], structuredContent: value as Record<string, unknown> });
@@ -174,6 +174,8 @@ server.tool("set_drum_pad", "Mute or solo a Drum Rack pad, by its note (a number
 server.tool("rack_variation", "Store the rack's current macros as a new variation, recall or delete a variation by index, or randomize the macros. Deleting needs confirm=true. Needs Live 11 or newer.", {
   ...rackTarget, action: z.enum(["store", "recall", "delete", "randomize"]), variationIndex: z.number().int().min(0).optional(), confirm: z.boolean().default(false), dryRun: z.boolean().default(false)
 }, async input => response(await session.rackVariation(input)));
+server.tool("get_meters", "Read every track's, return track's, and the master's output meter right now, in dB (left, right, and peak). Live's meters move in steps of about 1.5 dB, and read silence while Live is stopped.", {}, async () => response(await session.getMeters()));
+server.tool("mix_check", "Sample the output meters while Live plays (default 4 seconds) and report peak and average level per track, then flag problems: anything over 0 dBFS, a master with under 1 dB of headroom, a track playing a clip but making no sound, a track leaning hard left or right, and a track 24 dB or more below the loudest. Start playback first.", { seconds: z.number().min(1).max(30).default(4) }, async input => response(await session.mixCheck(input)));
 
 server.tool("omnihost_status", "Check whether Control Deck OmniHost is loaded and return its full VST3 parameter-index status.", {}, async () => response(await omnihost.status()));
 server.tool("list_omnihost_parameters", "Search Mini V4 parameters indexed by Control Deck OmniHost, excluding MIDI CC helper entries by default.", {
