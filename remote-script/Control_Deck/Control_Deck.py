@@ -11,6 +11,7 @@ import Live
 from _Framework.ControlSurface import ControlSurface
 
 from .bridge_core import BridgeError, filter_plugins, format_from_path, public_plugin, resolve_plugin
+from .session_ops import SESSION_COMMANDS, SESSION_QUERIES, SessionOps
 
 
 SCRIPT_NAME = "Control Deck Bridge"
@@ -31,7 +32,7 @@ MAX_ARRANGEMENT_BEATS = 1576800.0
 MAX_NOTES_PER_CALL = 256
 
 
-class ControlDeckBridge(ControlSurface):
+class ControlDeckBridge(SessionOps, ControlSurface):
     def __init__(self, c_instance):
         super(ControlDeckBridge, self).__init__(c_instance)
         self._set_suppress_rebuild_requests(True)
@@ -178,14 +179,19 @@ class ControlDeckBridge(ControlSurface):
             "cacheBuiltAt": self._cache_built_at,
             "liveControl": True,
             "pluginLoading": True,
-            "capabilities": ["live-control", "read-back-verification", "plugin-browser", "plugin-loading", "user-device-loading"],
+            "capabilities": [
+                "live-control", "read-back-verification", "plugin-browser", "plugin-loading", "user-device-loading",
+                "mixer", "session-launch", "scenes", "clip-properties", "undo", "track-routing", "session-notes", "return-tracks",
+            ],
         }
 
     def _live_query(self, params):
         address, args = self._live_request(params)
         song = self.song()
 
-        if address == "/live/song/get/cue_points":
+        if address in SESSION_QUERIES:
+            values = self._session_query(address, args)
+        elif address == "/live/song/get/cue_points":
             values = []
             for cue in song.cue_points:
                 values.extend([cue.name, cue.time])
@@ -287,8 +293,14 @@ class ControlDeckBridge(ControlSurface):
 
     def _live_command(self, params):
         address, args = self._live_request(params)
+        self._in_undo_step(address, lambda: self._run_live_command(address, args))
+        return {"address": address, "completed": True}
+
+    def _run_live_command(self, address, args):
         song = self.song()
-        if address in {"/live/song/start_playing", "/live/song/stop_playing", "/live/song/continue_playing"}:
+        if address in SESSION_COMMANDS:
+            self._session_command(address, args)
+        elif address in {"/live/song/start_playing", "/live/song/stop_playing", "/live/song/continue_playing"}:
             method = address.rsplit("/", 1)[-1]
             getattr(song, method)()
         elif address in {"/live/song/create_midi_track", "/live/song/create_audio_track"}:
@@ -391,7 +403,6 @@ class ControlDeckBridge(ControlSurface):
                 song.set_or_delete_cue()
         else:
             raise BridgeError("ADDRESS_NOT_ALLOWED", "Unsupported Live mutation: %s" % address)
-        return {"address": address, "completed": True}
 
     def _require_playhead_at(self, time_beats):
         # set_or_delete_cue toggles a locator wherever the playhead is, and Live
@@ -428,7 +439,7 @@ class ControlDeckBridge(ControlSurface):
             index = int(args[0])
             track = self.song().tracks[index]
         except Exception:
-            raise BridgeError("INVALID_TRACK", "Track index does not exist")
+            raise BridgeError("INVALID_TRACK", "Track index %s does not exist" % (args[0],))
         if index < 0:
             raise BridgeError("INVALID_TRACK", "Track index must be non-negative")
         return index, track
@@ -440,7 +451,7 @@ class ControlDeckBridge(ControlSurface):
             scene_index = int(args[1])
             slot = track.clip_slots[scene_index]
         except Exception:
-            raise BridgeError("INVALID_SCENE", "Scene index does not exist")
+            raise BridgeError("INVALID_SCENE", "Scene index %s does not exist" % (args[1],))
         if scene_index < 0:
             raise BridgeError("INVALID_SCENE", "Scene index must be non-negative")
         return track_index, scene_index, slot
@@ -452,7 +463,7 @@ class ControlDeckBridge(ControlSurface):
             device_index = int(args[1])
             device = track.devices[device_index]
         except Exception:
-            raise BridgeError("INVALID_DEVICE", "Device index does not exist")
+            raise BridgeError("INVALID_DEVICE", "Device index %s does not exist" % (args[1],))
         if device_index < 0:
             raise BridgeError("INVALID_DEVICE", "Device index must be non-negative")
         return track_index, device_index, device
@@ -463,7 +474,7 @@ class ControlDeckBridge(ControlSurface):
             parameter_index = int(args[position])
             parameter = device.parameters[parameter_index]
         except Exception:
-            raise BridgeError("INVALID_PARAMETER", "Parameter index does not exist")
+            raise BridgeError("INVALID_PARAMETER", "Parameter index %s does not exist" % (args[position],))
         if parameter_index < 0:
             raise BridgeError("INVALID_PARAMETER", "Parameter index must be non-negative")
         return parameter_index, parameter
@@ -638,7 +649,10 @@ class ControlDeckBridge(ControlSurface):
     def _modify_arrangement_notes(self, args):
         _track_index, _track, clip_index, clip = self._arrangement_target(args)
         self._require_midi_clip(clip, clip_index)
-        mods = args[4:]
+        self._modify_clip_notes(clip, "arrangement clip %d" % clip_index, args[4:])
+
+    def _modify_clip_notes(self, clip, label, mods):
+        # Shared by Arrangement and Session clips. label names the clip in errors.
         if not mods or len(mods) % 6 != 0:
             raise BridgeError("INVALID_NOTES", "Note modifications must contain groups of id, pitch, start, duration, velocity, and mute")
         if len(mods) // 6 > MAX_NOTES_PER_CALL:
@@ -648,7 +662,7 @@ class ControlDeckBridge(ControlSurface):
         for note in vector:
             note_id = int(note.note_id)
             if note_id in by_id:
-                raise BridgeError("NOTE_ID_AMBIGUOUS", "Arrangement clip %d has more than one note with id %d" % (clip_index, note_id))
+                raise BridgeError("NOTE_ID_AMBIGUOUS", "%s has more than one note with id %d" % (label[0].upper() + label[1:], note_id))
             by_id[note_id] = note
         seen = set()
         for offset in range(0, len(mods), 6):
@@ -658,7 +672,7 @@ class ControlDeckBridge(ControlSurface):
             seen.add(note_id)
             note = by_id.get(note_id)
             if note is None:
-                raise BridgeError("NOTE_NOT_FOUND", "No note with id %d in arrangement clip %d" % (note_id, clip_index))
+                raise BridgeError("NOTE_NOT_FOUND", "No note with id %d in %s" % (note_id, label))
             pitch, start_time, duration, velocity = self._validated_note(mods[offset + 1], mods[offset + 2], mods[offset + 3], mods[offset + 4], 0)
             note.pitch = pitch
             note.start_time = start_time
@@ -673,17 +687,21 @@ class ControlDeckBridge(ControlSurface):
         self._require_args(args, 8, "/live/arrangement_clip/remove/notes")
         _track_index, _track, clip_index, clip = self._arrangement_target(args)
         self._require_midi_clip(clip, clip_index)
-        from_pitch = self._whole_number(args[4], "fromPitch", 0, 127)
-        pitch_span = self._whole_number(args[5], "pitchSpan", 1, 128)
+        self._remove_clip_notes(clip, "arrangement clip %d" % clip_index, args[4:8])
+
+    def _remove_clip_notes(self, clip, label, values):
+        # values: fromPitch, pitchSpan, fromTime, timeSpan. Shared by Arrangement and Session clips.
+        from_pitch = self._whole_number(values[0], "fromPitch", 0, 127)
+        pitch_span = self._whole_number(values[1], "pitchSpan", 1, 128)
         if from_pitch + pitch_span > 128:
             raise BridgeError("INVALID_RANGE", "Pitch range must stay inside 0-127")
-        from_time = self._finite_float(args[6], "fromTime")
-        time_span = self._finite_float(args[7], "timeSpan")
+        from_time = self._finite_float(values[2], "fromTime")
+        time_span = self._finite_float(values[3], "timeSpan")
         if from_time < 0 or time_span <= 0:
             raise BridgeError("INVALID_RANGE", "fromTime must be >= 0 and timeSpan must be positive")
         matched = [note for note in self._clip_notes(clip) if self._note_starts_in_range(note, from_pitch, pitch_span, from_time, time_span)]
         if not matched:
-            raise BridgeError("NOTE_NOT_FOUND", "No notes start in that pitch and time range on arrangement clip %d" % clip_index)
+            raise BridgeError("NOTE_NOT_FOUND", "No notes start in that pitch and time range on %s" % label)
         clip.remove_notes_extended(from_pitch, pitch_span, from_time, time_span)
 
     def _note_specifications(self, note_values):

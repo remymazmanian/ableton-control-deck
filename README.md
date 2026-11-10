@@ -35,6 +35,14 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 - Status, transport, tempo, time signature, and song position with readback verification
 - List, create, rename, and safely delete tracks
 - Create Session View MIDI clips and write validated note content
+- Mixer control: volume in dB, pan, mute, solo, arm, and sends on tracks, return tracks, and the master, read back as Live displays them; create and delete return tracks
+- Read, change, and remove notes in Session clips by note id
+- Load samples from your sample index, or any audio file, into a Session slot, the Arrangement, or Simpler
+- Launch and stop Session clips and scenes, and see what is playing or queued
+- Create, duplicate, rename, recolor, and delete scenes, with per-scene tempo and time signature
+- Session clip properties: loop, markers, launch mode and quantization, color, mute, and audio gain, transpose, and warp; duplicate a clip to an empty slot or delete it with confirmation
+- One Live undo step per change, plus `undo` and `redo`
+- Track color, group folding, duplication, and input and output routing by exact name
 - Inspect scenes, clips, selection, devices, and every parameter Live exposes
 - Discover, resolve, and load VST3/VST2/AU plug-ins on an exact track through Live's Browser
 - Load native Live devices (Drum Rack, Echo, Reverb, ...) by exact Browser name with ambiguity refusal

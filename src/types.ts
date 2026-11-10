@@ -1,6 +1,7 @@
 export type OscAtom = string | number | boolean;
 export interface OscTypedNumber { type: "i" | "f"; value: number }
-export type OscArgument = OscAtom | OscTypedNumber;
+/** null fills an unused slot in a fixed-width group, such as a scene change with no extra value. */
+export type OscArgument = OscAtom | OscTypedNumber | null;
 
 export const oscInt = (value: number): OscTypedNumber => ({ type: "i", value });
 export const oscFloat = (value: number): OscTypedNumber => ({ type: "f", value });

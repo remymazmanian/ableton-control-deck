@@ -34,3 +34,11 @@ export function validateNotes(notes: MidiNote[]): Array<Required<MidiNote> & { p
     return parsed.data;
   });
 }
+
+/** Check a note about to be sent to Live. velocityMin is 0 when the velocity is carried over unchanged. */
+export function assertOutgoingNote(note: { pitch: number; startTime: number; duration: number; velocity: number }, velocityMin: number): void {
+  if (!Number.isInteger(note.pitch) || note.pitch < 0 || note.pitch > 127) throw new Error("Pitch must be an integer from 0 to 127.");
+  if (!Number.isFinite(note.startTime) || note.startTime < 0) throw new Error("Note start must be a non-negative number of beats.");
+  if (!Number.isFinite(note.duration) || note.duration <= 0) throw new Error("Note duration must be positive.");
+  if (!Number.isInteger(note.velocity) || note.velocity < velocityMin || note.velocity > 127) throw new Error(`Velocity must be an integer from ${velocityMin} to 127.`);
+}
