@@ -38,6 +38,7 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 - Mixer control: volume in dB, pan, mute, solo, arm, and sends on tracks, return tracks, and the master, read back as Live displays them; create and delete return tracks
 - Read, change, and remove notes in Session clips by note id
 - Load samples from your sample index, or any audio file, into a Session slot, the Arrangement, or Simpler
+- Turn devices on and off, and delete them with confirmation
 - Launch and stop Session clips and scenes, and see what is playing or queued
 - Create, duplicate, rename, recolor, and delete scenes, with per-scene tempo and time signature
 - Session clip properties: loop, markers, launch mode and quantization, color, mute, and audio gain, transpose, and warp; duplicate a clip to an empty slot or delete it with confirmation

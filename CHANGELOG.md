@@ -20,6 +20,7 @@ In Live 12.4.16 these all passed:
 - play, stop, continue, and playhead moves leave no empty undo steps, so one undo after them still reverts the last real change
 - audio clip gain (shown as Live's dB display), transpose from -12 to +7, detune, every warp mode tried (complex, re-pitch, texture, beats), and warping off, with out-of-range gain and transpose refused
 - folding and unfolding a group track, with folding a non-group track refused
+- devices: listing with on/off state on a track, a return track, and the master (including a plug-in), turning EQ Eight off with one undo turning it back on, deleting a device with the chain read back, and refusal of a stale device name and a missing confirmation
 - sample loading: into a Session slot (with and without a clip name), onto the Arrangement, and into an empty and a loaded Simpler; refusal of an occupied slot, a MIDI track, a start inside a clip, and a stale device name; a sample that would cover an existing clip undone with the clip restored; and Live's renaming of the track and Simpler after the sample reported
 - Session clip notes: read with ids, change by id (pitch by name, velocity, length), remove a range, one undo restoring removed notes, and refusal of an unknown id, a stale clip name, and an empty range
 - return tracks: create with a name (Live reads it back with its letter, such as `C-CD Return`), a send added to every track, delete with confirmation, and the later returns moving up a letter
@@ -34,6 +35,7 @@ Still unchecked: REX and Complex Pro warp modes, and tracks nested more than one
 - `get_clip` and `set_clip` read and change Session clip loop, markers, launch mode and quantization, legato, mute, color, and audio gain, transpose, detune, and warp. `duplicate_clip` copies into an empty slot of a matching track. `delete_clip` needs `confirm: true`.
 - `get_clip_notes`, `modify_clip_notes`, and `remove_clip_notes` read and edit notes in Session MIDI clips by note id, matching the Arrangement note tools.
 - `load_sample_to_clip_slot`, `load_sample_to_arrangement`, and `replace_simpler_sample` load an audio file, by `sampleId` from `search_samples` or by path, into a Session slot, the Arrangement, or a Simpler device. A load that would trim an existing Arrangement clip is undone and refused. Needs Live 12.
+- `get_devices`, `set_device_enabled`, and `delete_device` list a track's devices with their on/off state, switch a device on or off, and delete one with `confirm: true`. They work on tracks, return tracks, and the master.
 - `get_clip` shows an audio clip's file.
 - `create_return_track` and `delete_return_track`. Deleting needs `confirm: true`.
 - `undo`, `redo`, and `get_undo_state`. The result warns that Live's most recent step may be a change made by hand.

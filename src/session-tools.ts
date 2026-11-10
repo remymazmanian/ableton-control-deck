@@ -995,4 +995,73 @@ export class SessionTools {
     });
   }
 
+
+  // ------------------------------------------------------------------ device on/off and delete
+
+  private async deviceStates(kind: TrackKind, index: number): Promise<{ trackName: string; devices: Array<{ deviceIndex: number; name: string; className: string; enabled: boolean | null }> }> {
+    const args = (await this.live.query("/live/devices/get/state", trackArgs(kind, index))).args;
+    const count = Number(args[3]);
+    if (!Number.isInteger(count) || args.length !== 4 + count * 3) throw new Error("Device state reply has the wrong length. Reinstall the Control Deck remote script and restart Live.");
+    const devices = [];
+    for (let position = 0; position < count; position++) {
+      const [name, className, enabled] = args.slice(4 + position * 3, 7 + position * 3);
+      devices.push({ deviceIndex: position, name: String(name), className: String(className), enabled: typeof enabled === "boolean" ? enabled : null });
+    }
+    return { trackName: String(args[2]), devices };
+  }
+
+  getDevices(input: { trackKind?: TrackKind; trackIndex: number }): Promise<ToolResult> {
+    const kind = input.trackKind ?? "track";
+    return this.read("get_devices", async () => {
+      nonNegativeInteger(input.trackIndex, "Track index");
+      const { trackName, devices } = await this.deviceStates(kind, input.trackIndex);
+      return { trackKind: kind, trackIndex: input.trackIndex, trackName, devices };
+    });
+  }
+
+  private async requireDevice(input: TrackTarget & { deviceIndex: number; expectedDeviceName: string }) {
+    const kind = input.trackKind ?? "track";
+    nonNegativeInteger(input.trackIndex, "Track index");
+    nonNegativeInteger(input.deviceIndex, "Device index");
+    requireName(input.expectedDeviceName, "expectedDeviceName");
+    const state = await this.deviceStates(kind, input.trackIndex);
+    this.requireTrackName(state.trackName, input.expectedTrackName, kind === "track" ? "track" : `${kind} track`);
+    const device = state.devices[input.deviceIndex];
+    if (!device) throw new Error(`Device index ${input.deviceIndex} does not exist; '${state.trackName}' has ${state.devices.length} device(s).`);
+    if (device.name !== input.expectedDeviceName) throw new Error(`Device safeguard failed: expected device ${input.deviceIndex} to be '${input.expectedDeviceName}', found '${device.name}'.`);
+    return { kind, state, device };
+  }
+
+  private deviceArgs(input: TrackTarget & { deviceIndex: number; expectedDeviceName: string }): OscArgument[] {
+    return [...trackArgs(input.trackKind ?? "track", input.trackIndex), input.expectedTrackName, oscInt(input.deviceIndex), input.expectedDeviceName];
+  }
+
+  setDeviceEnabled(input: TrackTarget & { deviceIndex: number; expectedDeviceName: string; enabled: boolean; dryRun?: boolean }): Promise<ToolResult> {
+    return this.change("set_device_enabled", input, input.dryRun ?? false, async () => {
+      const { device } = await this.requireDevice(input);
+      if (device.enabled === null) throw new Error(`Device '${device.name}' has no on/off switch.`);
+      return { address: "/live/device/set_enabled", args: [...this.deviceArgs(input), input.enabled], before: device.enabled };
+    }, async before => {
+      const kind = input.trackKind ?? "track";
+      const { value: after, settled } = await this.poll(() => this.deviceStates(kind, input.trackIndex), state => state.devices[input.deviceIndex]?.enabled === input.enabled);
+      if (!settled) throw new Error(`Device '${input.expectedDeviceName}' is ${after.devices[input.deviceIndex]?.enabled ? "on" : "off"}, not ${input.enabled ? "on" : "off"}.`);
+      return { trackIndex: input.trackIndex, deviceIndex: input.deviceIndex, name: input.expectedDeviceName, before, enabled: input.enabled };
+    });
+  }
+
+  deleteDevice(input: TrackTarget & { deviceIndex: number; expectedDeviceName: string; confirm: boolean; dryRun?: boolean }): Promise<ToolResult> {
+    return this.change("delete_device", input, input.dryRun ?? false, async () => {
+      if (input.confirm !== true && !(input.dryRun ?? false)) throw new Error("delete_device requires confirm=true.");
+      const { state } = await this.requireDevice(input);
+      return { address: "/live/device/delete", args: [...this.deviceArgs(input), input.confirm === true], before: state.devices };
+    }, async before => {
+      const kind = input.trackKind ?? "track";
+      const { value: after, settled } = await this.poll(() => this.deviceStates(kind, input.trackIndex), state => state.devices.length === before.length - 1);
+      if (!settled) throw new Error(`The track has ${after.devices.length} devices, expected ${before.length - 1}.`);
+      const expected = before.filter((_device, position) => position !== input.deviceIndex).map(device => device.name);
+      if (JSON.stringify(after.devices.map(device => device.name)) !== JSON.stringify(expected)) throw new Error(`The device chain is ${after.devices.map(device => device.name).join(", ")}, not ${expected.join(", ")}.`);
+      return { deleted: { deviceIndex: input.deviceIndex, name: input.expectedDeviceName }, devices: after.devices };
+    });
+  }
+
 }

@@ -531,6 +531,33 @@ class SessionOpsTests(unittest.TestCase):
         self.assertIn("not Simpler", self.refused("/live/device/replace_sample", 0, "Drums", 0, "EQ Eight", path))
         self.assertIn("found 'Simpler'", self.refused("/live/device/replace_sample", 0, "Drums", 1, "Sampler", path))
 
+    # ---------------------------------------------------------------- devices
+
+    def device(self, name, switch=True):
+        parameters = [Parameter("Device On", 1.0, 0.0, 1.0)] if switch else [Parameter("Macro 1", 0.0)]
+        return types.SimpleNamespace(name=name, class_name="Eq8", parameters=parameters)
+
+    def test_reads_and_switches_devices_on_and_off(self):
+        track = self.song.tracks[0]
+        track.devices = [self.device("EQ Eight"), self.device("Odd", switch=False)]
+        self.assertEqual(self.query("/live/devices/get/state", "track", 0), ["track", 0, "Drums", 2, "EQ Eight", "Eq8", True, "Odd", "Eq8", None])
+        self.command("/live/device/set_enabled", "track", 0, "Drums", 0, "EQ Eight", False)
+        self.assertEqual(track.devices[0].parameters[0].value, 0.0)
+        self.assertIn("no on/off switch", self.refused("/live/device/set_enabled", "track", 0, "Drums", 1, "Odd", False))
+        self.assertIn("found 'EQ Eight'", self.refused("/live/device/set_enabled", "track", 0, "Drums", 0, "Reverb", True))
+        self.song.return_tracks[0].devices = [self.device("Reverb")]
+        self.command("/live/device/set_enabled", "return", 0, "A-Reverb", 0, "Reverb", False)
+        self.assertEqual(self.song.return_tracks[0].devices[0].parameters[0].value, 0.0)
+
+    def test_deletes_a_device_only_with_confirm(self):
+        track = self.song.tracks[0]
+        track.devices = [self.device("EQ Eight"), self.device("Compressor")]
+        track.delete_device = lambda index: track.devices.pop(index)
+        self.assertIn("confirm", self.refused("/live/device/delete", "track", 0, "Drums", 1, "Compressor", False))
+        self.assertIn("does not exist", self.refused("/live/device/delete", "track", 0, "Drums", 5, "Compressor", True))
+        self.command("/live/device/delete", "track", 0, "Drums", 1, "Compressor", True)
+        self.assertEqual([device.name for device in track.devices], ["EQ Eight"])
+
     def test_lists_routing_options(self):
         values = self.query("/live/track/get/routing_options", "track", 0)
         self.assertEqual(values[:6], ["track", 0, "Drums", "input_routing_type", 3, "All Ins"])
