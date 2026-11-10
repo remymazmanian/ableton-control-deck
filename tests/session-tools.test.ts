@@ -332,6 +332,17 @@ describe("session clip notes and return tracks", () => {
     expect(result).toMatchObject({ ok: true, data: { noteCountModified: 1, notes: [{ pitch: 36 }, { noteId: 2, pitch: 40, velocity: 90, duration: 0.5 }, { pitch: 42 }] } });
   });
 
+  it("splits a large note edit into datagrams that fit, all for the same clip", async () => {
+    const notes = Array.from({ length: 256 }, (_, index) => [60, index * 0.123456789012345, 0.0999999999999, 100, false, index + 1] as [number, number, number, number, boolean, number]);
+    const live = fakeLive({ notes });
+    const result = await new SessionTools(live as never, logger as never).modifyClipNotes({ ...beat, notes: notes.map(note => ({ noteId: note[5], velocity: 90 })) });
+    expect(result.ok).toBe(true);
+    expect(live.sent.length).toBeGreaterThan(1);
+    expect(live.sent.every(entry => entry.address === "/live/session_clip/modify/notes" && entry.args[3] === "Beat")).toBe(true);
+    expect(live.sent.reduce((sum, entry) => sum + (entry.args.length - 4) / 6, 0)).toBe(256);
+    expect(live.state.notes.every(note => note[3] === 90)).toBe(true);
+  });
+
   it("refuses an unknown note id or a stale clip name without sending", async () => {
     const live = fakeLive();
     const tools = new SessionTools(live as never, logger as never);
