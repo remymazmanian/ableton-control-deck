@@ -558,6 +558,29 @@ class SessionOpsTests(unittest.TestCase):
         self.command("/live/device/delete", "track", 0, "Drums", 1, "Compressor", True)
         self.assertEqual([device.name for device in track.devices], ["EQ Eight"])
 
+    # ---------------------------------------------------------------- selection
+
+    def test_reads_selection_of_a_track_scene_and_clip(self):
+        self.song.tracks[0].clip_slots[1].clip = SessionClip("Fill")
+        self.song.view.selected_scene = self.song.scenes[1]
+        self.assertEqual(self.query("/live/view/get/selection"), ["track", 0, "Drums", 1, "Drop", True, "Fill"])
+        self.song.view.selected_track = self.song.return_tracks[0]
+        self.assertEqual(self.query("/live/view/get/selection")[:3], ["return", 0, "A-Reverb"])
+        self.song.view.selected_track = self.song.master_track
+        self.assertEqual(self.query("/live/view/get/selection")[:3], ["master", 0, "Main"])
+
+    def test_selects_a_track_a_scene_or_both_without_an_undo_step(self):
+        self.command("/live/view/select", "track", 1, "Vox", 1, "Drop")
+        self.assertEqual((self.song.view.selected_track.name, self.song.view.selected_scene.name), ("Vox", "Drop"))
+        self.command("/live/view/select", "return", 0, "A-Reverb", -1, "")
+        self.assertEqual((self.song.view.selected_track.name, self.song.view.selected_scene.name), ("A-Reverb", "Drop"))
+        self.command("/live/view/select", None, 0, "", 0, "Intro")
+        self.assertEqual(self.song.view.selected_scene.name, "Intro")
+        self.assertEqual(self.song.undo_log, [])
+        self.assertIn("found 'Vox'", self.refused("/live/view/select", "track", 1, "Bass", -1, ""))
+        self.assertIn("found 'Drop'", self.refused("/live/view/select", None, 0, "", 1, "Outro"))
+        self.assertIn("track, a scene", self.refused("/live/view/select", None, 0, "", -1, ""))
+
     def test_lists_routing_options(self):
         values = self.query("/live/track/get/routing_options", "track", 0)
         self.assertEqual(values[:6], ["track", 0, "Drums", "input_routing_type", 3, "All Ins"])

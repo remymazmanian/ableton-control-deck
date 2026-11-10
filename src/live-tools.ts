@@ -242,7 +242,15 @@ export class LiveTools {
       const version = (await this.live.query("/live/application/get/version")).args;
       const [transport, signature, scenes, selectedTrack] = await Promise.all([this.getTransport(), this.getTimeSignature(), this.listScenes(), this.getSelectedTrack()]);
       const tracks = (await this.live.query("/live/song/get/track_names")).args.map((name, index) => ({ index, id: `track:${index}`, name: String(name) }));
-      return { liveVersion: { major: Number(version[0]), minor: Number(version[1]) }, transport: transport.data, timeSignature: signature.data, tracks, scenes: scenes.data, selectedTrack: selectedTrack.data };
+      // list_scenes wraps its list as { scenes }, so unwrap it here rather than nesting it twice.
+      const sceneList = (scenes.data as { scenes?: unknown } | undefined)?.scenes ?? [];
+      // A return track or the master can be selected; get_selected_track only knows regular tracks.
+      let selection: unknown = null;
+      try {
+        const [kind, index, name, sceneIndex, sceneName] = (await this.live.query("/live/view/get/selection")).args;
+        selection = { track: kind === null ? null : { trackKind: kind, trackIndex: Number(index), name: String(name) }, scene: Number(sceneIndex) < 0 ? null : { sceneIndex: Number(sceneIndex), name: String(sceneName) } };
+      } catch { /* older remote script: selectedTrack below still covers regular tracks */ }
+      return { liveVersion: { major: Number(version[0]), minor: Number(version[1]) }, transport: transport.data, timeSignature: signature.data, tracks, scenes: sceneList, selectedTrack: selectedTrack.ok ? selectedTrack.data : null, selection };
     });
   }
 

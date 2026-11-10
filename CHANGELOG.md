@@ -4,6 +4,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+In Live 12.4.16 these passed: selecting a return track, the master, and a track with a scene; refusal of a stale track name and a missing scene; `get_live_set` with a return track selected; and no undo step added by selecting.
+
+### Added
+
+- `get_selection` reads the selected track (including a return track or the master), scene, and clip. `select` selects a track, a scene, or both by index and current name and reads the selection back. Selecting is not an undo step.
+
+### Fixed
+
+- `get_live_set` returned scenes nested twice (`scenes.scenes`). `scenes` is now the scene list. It also adds `selection`, which still names the selected track when it is a return track or the master. `selectedTrack` is `null` in that case instead of missing.
+
 ## [1.3.0] - 2026-11-09
 
 Mixer control and return tracks, Session launching, scenes, clip properties and notes, undo, track routing, sample loading, device on/off and delete, and batched note writes. 107 tools, up from 75. Tested with Ableton Live 12.4.16. After updating, run `npm run setup` and restart Live so it loads the new remote script, which adds `session_ops.py`.

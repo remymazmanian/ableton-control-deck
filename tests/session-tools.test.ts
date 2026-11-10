@@ -25,6 +25,7 @@ interface FakeState {
   simplerFile: string | null;
   /** Devices on track 0 (Drums): name, enabled (null when a device has no switch). */
   devices: Array<[string, boolean | null]>;
+  selection: [string | null, number, string | null, number, string | null, boolean, string | null];
 }
 
 const db = (value: number) => (value <= 0 ? "-inf dB" : `${((value - 0.85) * 40).toFixed(1)} dB`);
@@ -48,6 +49,7 @@ function fakeLive(overrides: Partial<FakeState> = {}) {
     sampleLength: 4,
     simplerFile: "/old.wav",
     devices: [["EQ Eight", true], ["Compressor", true]],
+    selection: ["track", 0, "Drums", 0, "Intro", true, "Beat"],
     ...overrides
   };
   const sent: Array<{ address: string; args: unknown[] }> = [];
@@ -97,6 +99,10 @@ function fakeLive(overrides: Partial<FakeState> = {}) {
         undoStack.push(() => { state.arrangement = [["Verse", 16, 32]]; });
       }
       if (address === "/live/song/undo") undoStack.pop()?.();
+      if (address === "/live/view/select") {
+        if (args[0] !== null) state.selection.splice(0, 3, String(args[0]), Number(args[1]), String(args[2]));
+        if (Number(args[3]) >= 0) state.selection.splice(3, 2, Number(args[3]), state.scenes[Number(args[3])].name);
+      }
       if (address === "/live/device/set_enabled") state.devices[Number(args[3])][1] = args[5] === true;
       if (address === "/live/device/delete") state.devices.splice(Number(args[3]), 1);
       if (address === "/live/device/replace_sample") state.simplerFile = String(args[4]);
@@ -146,6 +152,7 @@ function fakeLive(overrides: Partial<FakeState> = {}) {
       if (address === "/live/song/get/scenes/name") return { args: state.scenes.map(scene => scene.name) };
       if (address === "/live/session/get/playback") return { args: [state.tracks.length, ...state.tracks.flatMap(track => [track.name, track.playing, track.fired]), state.scenes.length, ...state.scenes.map(scene => scene.triggered)] };
       if (address === "/live/track/get/arrangement_clips") return { args: [args[0], ...(Number(args[0]) === 1 ? state.arrangement.flatMap(([name, start, end]) => [name, start, end, "audio"]) : [])] };
+      if (address === "/live/view/get/selection") return { args: [...state.selection] };
       if (address === "/live/devices/get/state") return { args: [args[0], args[1], "Drums", state.devices.length, ...state.devices.flatMap(([name, enabled]) => [name, "Eq8", enabled])] };
       if (address === "/live/track/get/devices/name") return { args: [args[0], "EQ Eight", "Simpler"] };
       if (address === "/live/device/get/sample") return { args: [args[0], args[2], "Simpler", state.simplerFile] };
@@ -488,5 +495,30 @@ describe("devices", () => {
     const tools = new SessionTools(live as never, logger as never);
     expect(await tools.deleteDevice({ ...eq, confirm: false })).toMatchObject({ ok: false, error: { message: expect.stringMatching(/confirm=true/) } });
     expect(await tools.deleteDevice({ ...eq, confirm: true })).toMatchObject({ ok: true, data: { deleted: { name: "EQ Eight" }, devices: [{ deviceIndex: 0, name: "Compressor" }] } });
+  });
+});
+
+describe("selection", () => {
+  it("reads the selected track, scene, and clip", async () => {
+    const result = await new SessionTools(fakeLive() as never, logger as never).getSelection();
+    expect(result).toMatchObject({ ok: true, data: { track: { trackKind: "track", trackIndex: 0, name: "Drums" }, scene: { sceneIndex: 0, name: "Intro" }, clip: { name: "Beat" } } });
+    const master = await new SessionTools(fakeLive({ selection: ["master", 0, "Main", -1, null, false, null] }) as never, logger as never).getSelection();
+    expect(master).toMatchObject({ ok: true, data: { track: { trackKind: "master", name: "Main" }, scene: null, clip: null } });
+  });
+
+  it("selects a track and scene by name and reads the selection back", async () => {
+    const live = fakeLive();
+    const result = await new SessionTools(live as never, logger as never).select({ trackIndex: 1, expectedTrackName: "Bass", sceneIndex: 1, expectedSceneName: "" });
+    expect(live.sent[0]).toEqual({ address: "/live/view/select", args: ["track", 1, "Bass", 1, ""] });
+    expect(result).toMatchObject({ ok: true, data: { after: { track: { trackIndex: 1, name: "Bass" }, scene: { sceneIndex: 1 } } } });
+  });
+
+  it("refuses an empty selection, a missing name, or a stale scene name without sending", async () => {
+    const live = fakeLive();
+    const tools = new SessionTools(live as never, logger as never);
+    expect(await tools.select({})).toMatchObject({ ok: false, error: { message: expect.stringMatching(/trackIndex, sceneIndex, or both/) } });
+    expect(await tools.select({ trackIndex: 0 })).toMatchObject({ ok: false, error: { message: expect.stringMatching(/expectedTrackName is required/) } });
+    expect(await tools.select({ sceneIndex: 0, expectedSceneName: "Drop" })).toMatchObject({ ok: false });
+    expect(live.send).not.toHaveBeenCalled();
   });
 });

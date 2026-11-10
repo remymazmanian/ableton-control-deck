@@ -1075,4 +1075,49 @@ export class SessionTools {
     });
   }
 
+
+  // ------------------------------------------------------------------ selection
+
+  private async selection() {
+    const [kind, index, trackName, sceneIndex, sceneName, hasClip, clipName] = (await this.live.query("/live/view/get/selection")).args;
+    return {
+      track: kind === null ? null : { trackKind: kind as TrackKind, trackIndex: Number(index), name: String(trackName) },
+      scene: Number(sceneIndex) < 0 ? null : { sceneIndex: Number(sceneIndex), name: String(sceneName) },
+      clip: hasClip === true ? { name: String(clipName) } : null
+    };
+  }
+
+  getSelection(): Promise<ToolResult> {
+    return this.read("get_selection", () => this.selection());
+  }
+
+  select(input: { trackKind?: TrackKind; trackIndex?: number; expectedTrackName?: string; sceneIndex?: number; expectedSceneName?: string; dryRun?: boolean }): Promise<ToolResult> {
+    const kind = input.trackKind ?? "track";
+    const wantsTrack = input.trackIndex !== undefined;
+    const wantsScene = input.sceneIndex !== undefined;
+    return this.change("select", input, input.dryRun ?? false, async () => {
+      if (!wantsTrack && !wantsScene) throw new Error("Pass trackIndex, sceneIndex, or both.");
+      if (wantsTrack) {
+        nonNegativeInteger(input.trackIndex!, "Track index");
+        if (input.expectedTrackName === undefined) throw new Error("expectedTrackName is required with trackIndex.");
+      }
+      if (wantsScene) {
+        if (input.expectedSceneName === undefined) throw new Error("expectedSceneName is required with sceneIndex (use \"\" for an unnamed scene).");
+        await this.requireScene(input.sceneIndex!, input.expectedSceneName);
+      }
+      return {
+        address: "/live/view/select",
+        args: [wantsTrack ? kind : null, oscInt(input.trackIndex ?? 0), input.expectedTrackName ?? "", oscInt(wantsScene ? input.sceneIndex! : -1), input.expectedSceneName ?? ""],
+        before: await this.selection()
+      };
+    }, async before => {
+      const matches = (state: Awaited<ReturnType<SessionTools["selection"]>>) =>
+        (!wantsTrack || (state.track?.trackKind === kind && state.track.trackIndex === input.trackIndex)) &&
+        (!wantsScene || state.scene?.sceneIndex === input.sceneIndex);
+      const { value: after, settled } = await this.poll(() => this.selection(), matches);
+      if (!settled) throw new Error(`Live shows ${after.track ? `${after.track.trackKind} ${after.track.trackIndex}` : "no track"} and ${after.scene ? `scene ${after.scene.sceneIndex}` : "no scene"} selected.`);
+      return { before, after };
+    });
+  }
+
 }

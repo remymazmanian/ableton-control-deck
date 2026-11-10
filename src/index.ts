@@ -150,6 +150,10 @@ const deviceTarget = { trackKind: trackKind, trackIndex: z.number().int().min(0)
 server.tool("get_devices", "List the top-level devices on a track, return track, or the master, with each device's index, name, type, and whether it is on.", { trackKind: trackKind, trackIndex: z.number().int().min(0) }, async input => response(await session.getDevices(input)));
 server.tool("set_device_enabled", "Turn a device on or off (its Device On switch), by track and device index and their current names, then read it back.", { ...deviceTarget, enabled: z.boolean(), dryRun: z.boolean().default(false) }, async input => response(await session.setDeviceEnabled(input)));
 server.tool("delete_device", "Delete a top-level device from a track, by track and device index and their current names. Needs confirm=true. The device chain is read back.", { ...deviceTarget, confirm: z.boolean().default(false), dryRun: z.boolean().default(false) }, async input => response(await session.deleteDevice(input)));
+server.tool("get_selection", "Read what is selected in Live: the track (including a return track or the master), the scene, and the clip in that slot if there is one.", {}, async () => response(await session.getSelection()));
+server.tool("select", "Select a track (or return track, or the master), a scene, or both in Live, by index and current name, then read the selection back. Selecting a track and a scene highlights that clip slot. It does not change the set and is not an undo step.", {
+  trackKind, trackIndex: z.number().int().min(0).optional(), expectedTrackName: z.string().min(1).optional(), sceneIndex: z.number().int().min(0).optional(), expectedSceneName: z.string().optional(), dryRun: z.boolean().default(false)
+}, async input => response(await session.select(input)));
 
 server.tool("omnihost_status", "Check whether Control Deck OmniHost is loaded and return its full VST3 parameter-index status.", {}, async () => response(await omnihost.status()));
 server.tool("list_omnihost_parameters", "Search Mini V4 parameters indexed by Control Deck OmniHost, excluding MIDI CC helper entries by default.", {
