@@ -212,6 +212,9 @@ class ControlDeckLiveTests(unittest.TestCase):
     def setUp(self):
         self.song = Song()
         self.bridge = ControlDeckBridge.__new__(ControlDeckBridge)
+        self._real_reader = bridge_module.read_machine_token
+        bridge_module.read_machine_token = lambda path=None: None
+        self.addCleanup(lambda: setattr(bridge_module, "read_machine_token", self._real_reader))
         self.bridge.song = lambda: self.song
         self.bridge.application = lambda: types.SimpleNamespace(get_major_version=lambda: 12, get_minor_version=lambda: 4)
 
@@ -363,10 +366,44 @@ class ControlDeckLiveTests(unittest.TestCase):
             base = {"protocol": "ableton-control-deck/1", "method": "live.command", "params": {"address": "/live/song/start_playing", "args": []}}
             self.bridge._handle_request(dict(base, id="no-token"), ("127.0.0.1", 12345))
             self.bridge._handle_request(dict(base, id="bad-token", token="wrong"), ("127.0.0.1", 12345))
+            self.bridge._handle_request(dict(base, id="empty-token", token=""), ("127.0.0.1", 12345))
+            # With no secret anywhere on this computer, even a request with no secret must be refused.
+            bridge_module.TOKEN = "__CONTROL_DECK" + "_TOKEN__"
+            self.bridge._token = None
+            self.bridge._handle_request(dict(base, id="nothing-anywhere"), ("127.0.0.1", 12345))
+            self.bridge._handle_request(dict(base, id="none-token", token=None), ("127.0.0.1", 12345))
             self.assertEqual(calls, [])
-            self.assertEqual([response["error"]["code"] for response in sent], ["AUTH_INVALID", "AUTH_INVALID"])
+            self.assertEqual([response["error"]["code"] for response in sent], ["AUTH_INVALID"] * 5)
         finally:
             bridge_module.TOKEN = previous_token
+
+    def test_prefers_this_computers_secret_file_and_picks_up_a_new_secret(self):
+        secrets = {"value": "machine-secret"}
+        bridge_module.read_machine_token = lambda path=None: secrets["value"]
+        previous_token = bridge_module.TOKEN
+        bridge_module.TOKEN = "old-stamped-secret"
+        try:
+            self.assertEqual(self.bridge._load_token(), "machine-secret")
+            self.bridge._token = "machine-secret"
+            self.bridge._responses = OrderedDict()
+            sent = []
+            self.bridge._send_response = lambda _address, response: sent.append(response)
+            self.bridge._dispatch = lambda method, params: {"completed": True}
+            base = {"protocol": "ableton-control-deck/1", "method": "live.command", "params": {"address": "/live/song/start_playing", "args": []}}
+            self.bridge._handle_request(dict(base, id="stamped", token="old-stamped-secret"), ("127.0.0.1", 1))
+            secrets["value"] = "new-secret"
+            self.bridge._handle_request(dict(base, id="renewed", token="new-secret"), ("127.0.0.1", 1))
+            self.assertEqual([response.get("ok") for response in sent], [False, True])
+            secrets["value"] = None
+            self.assertEqual(self.bridge._load_token(), "old-stamped-secret")
+        finally:
+            bridge_module.TOKEN = previous_token
+
+    def test_secret_file_lives_outside_synced_folders(self):
+        from Control_Deck.bridge_core import machine_token_path
+        self.assertEqual(machine_token_path("darwin", {}, "/Users/remy"), "/Users/remy/Library/Application Support/Ableton Control Deck/bridge-token")
+        windows = machine_token_path("win32", {"LOCALAPPDATA": "C:\\Users\\remym\\AppData\\Local"}, "C:\\Users\\remym")
+        self.assertTrue(windows.startswith("C:\\Users\\remym\\AppData\\Local") and windows.endswith("bridge-token") and "Ableton Control Deck" in windows)
 
     def test_infers_hidden_single_plugin_family_as_vst3(self):
         vendor = types.SimpleNamespace(name="FabFilter", children=[])

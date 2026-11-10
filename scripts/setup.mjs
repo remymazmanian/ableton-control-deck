@@ -5,11 +5,11 @@
 //                                     remote script, launch agents, activation
 //   npm run setup -- --skip-build     skip npm installs and builds (dev loop)
 //   npm run setup -- --skip-remote-script
-//   npm run setup -- --skip-agents    do not write or activate launch agents
+//   npm run setup -- --skip-agents    do not write or start the background services
 //
-// The double-click installer (`Install Ableton Control Deck.command`) runs
-// this same script, so keep every message understandable without a coding
-// background.
+// Works on macOS (launch agents) and Windows (Task Scheduler). The installers
+// run this same script, so keep every message understandable without a
+// coding background.
 
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -18,16 +18,21 @@ import { copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises"
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { inTemporaryFolder, isWindows, machineTokenPath, remoteScriptsPath } from "../src/platform.mjs";
 
 const root = path.dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
 const args = new Set(process.argv.slice(2));
 const home = homedir();
 const skipBuild = args.has("--skip-build");
 
-const tokenFile = path.join(root, "data", "bridge-token");
+// Before 1.5 the secret lived in data/bridge-token and was written into the remote script. It now
+// lives in a per-machine file outside any synced folder; an existing secret is moved there unchanged.
+const legacyTokenFile = path.join(root, "data", "bridge-token");
+const tokenFile = machineTokenPath();
 const installPathFile = path.join(root, "data", "install-path");
 const remoteScriptSource = path.join(root, "remote-script", "Control_Deck");
-const remoteScriptTargetDirectory = path.join(home, "Music", "Ableton", "User Library", "Remote Scripts", "Control_Deck");
+const remoteScriptTarget = remoteScriptsPath();
+const remoteScriptTargetDirectory = remoteScriptTarget.path;
 const sampleLibraryConfig = path.join(root, "config", "sample-library.json");
 const sampleLibraryExample = path.join(root, "config", "sample-library.example.json");
 const agentsDirectory = path.join(home, "Library", "LaunchAgents");
@@ -41,10 +46,14 @@ function fail(message) { failures += 1; console.log(`  ✗ ${message}`); }
 function heading(message) { console.log(`\n${message}`); }
 
 function run(command, commandArguments, { cwd = root, quiet = false } = {}) {
+  // On Windows npm is npm.cmd, which Node only runs through a shell.
+  const viaShell = isWindows && command === "npm";
   const result = spawnSync(command, commandArguments, {
     cwd,
     stdio: quiet ? ["ignore", "pipe", "pipe"] : ["ignore", "inherit", "inherit"],
     encoding: "utf8",
+    shell: viaShell,
+    windowsHide: true,
   });
   return result;
 }
@@ -53,9 +62,10 @@ heading("Ableton Control Deck setup");
 console.log(`  Install location: ${root}`);
 
 // ---------------------------------------------------------------- guardrails
-if (/\/(Downloads|Desktop)\//.test(`${root}/`) && !args.has("--allow-any-location")) {
+const temporaryFolder = inTemporaryFolder(root);
+if (temporaryFolder && !args.has("--allow-any-location")) {
   console.log(`
-  This folder is in your ${root.includes("/Downloads/") ? "Downloads" : "Desktop"} folder. Setup pins services to the
+  This folder is in your ${temporaryFolder} folder. Setup pins services to the
   folder's location, so please move it somewhere permanent first — your home
   folder works well. Then run the installer again from the new location.
 `);
@@ -124,12 +134,14 @@ if (!skipBuild) {
 heading("Bridge secret");
 await mkdir(path.dirname(tokenFile), { recursive: true });
 if (existsSync(tokenFile)) {
-  ok("Using the existing bridge secret");
+  ok("Using this computer's bridge secret");
+} else if (existsSync(legacyTokenFile)) {
+  await writeFile(tokenFile, `${(await readFile(legacyTokenFile, "utf8")).trim()}\n`, { mode: 0o600 });
+  ok(`Moved the bridge secret to ${tokenFile}`);
 } else {
   await writeFile(tokenFile, `${randomUUID()}\n`, { mode: 0o600 });
-  ok("Generated a new bridge secret (data/bridge-token)");
+  ok(`Generated a new bridge secret (${tokenFile})`);
 }
-const token = (await readFile(tokenFile, "utf8")).trim();
 
 // ------------------------------------------------------------ sample config
 if (!existsSync(sampleLibraryConfig) && existsSync(sampleLibraryExample)) {
@@ -142,20 +154,15 @@ if (!existsSync(sampleLibraryConfig) && existsSync(sampleLibraryExample)) {
 // ------------------------------------------------------------ remote script
 if (!args.has("--skip-remote-script")) {
   heading("Ableton Live remote script");
-  const placeholder = "__CONTROL_DECK_TOKEN__";
+  // The script reads the secret from this computer's secret file, so the copy in Live's User Library
+  // holds no secret and is safe in a synced folder.
   const entries = await readdir(remoteScriptSource);
   const pythonFiles = entries.filter(entry => entry.endsWith(".py"));
-  const mainSource = await readFile(path.join(remoteScriptSource, "Control_Deck.py"), "utf8");
-  if (!mainSource.includes(placeholder)) {
-    fail(`remote-script/Control_Deck/Control_Deck.py is missing the token placeholder ${placeholder}.`);
-  } else {
-    await mkdir(remoteScriptTargetDirectory, { recursive: true });
-    for (const file of pythonFiles) {
-      const source = await readFile(path.join(remoteScriptSource, file), "utf8");
-      await writeFile(path.join(remoteScriptTargetDirectory, file), source.replace(placeholder, token), { mode: 0o600 });
-    }
-    ok(`Installed to ${remoteScriptTargetDirectory}`);
+  await mkdir(remoteScriptTargetDirectory, { recursive: true });
+  for (const file of pythonFiles) {
+    await copyFile(path.join(remoteScriptSource, file), path.join(remoteScriptTargetDirectory, file));
   }
+  ok(`Installed to ${remoteScriptTargetDirectory} (found from ${remoteScriptTarget.source})`);
 }
 
 // ------------------------------------------------------------ launch agents
@@ -189,6 +196,40 @@ ${workingDirectoryEntry}  <key>RunAtLoad</key>
 `;
 }
 
+// Windows: one Task Scheduler task per service, started at sign-in and restarted if it stops. It runs
+// "whether the user is signed in or not" (S4U): no window, no stored password, the user's own account
+// and files, and Task Scheduler stays its parent so stopping the task stops the service. Accounts whose
+// policy does not allow that fall back to a windowless conhost launch, which Task Scheduler cannot watch.
+function taskName(label) {
+  return label === "com.abletondeck.api" ? "Ableton Control Deck API" : "Ableton Control Deck Dashboard";
+}
+
+function registerWindowsTask(agent) {
+  const quote = value => `'${String(value).replace(/'/g, "''")}'`;
+  const [executable, ...rest] = agent.programArguments;
+  const argumentLine = rest.map(value => `"${value}"`).join(" ");
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$name = ${quote(taskName(agent.label))}`,
+    "if (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue) { Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue; Unregister-ScheduledTask -TaskName $name -Confirm:$false }",
+    // Stop this service's Node from an earlier install (including one Task Scheduler lost track of) and wait
+    // for it to exit, so the new task does not find the port still taken.
+    `$entry = ${quote(rest[0])}`,
+    "$old = { @(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($entry) }) }",
+    "& $old | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
+    "for ($i = 0; $i -lt 40 -and (& $old).Count -gt 0; $i++) { Start-Sleep -Milliseconds 250 }",
+    "$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME",
+    "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew",
+    `$direct = New-ScheduledTaskAction -Execute ${quote(executable)} -Argument ${quote(argumentLine)} -WorkingDirectory ${quote(agent.workingDirectory)}`,
+    "$mode = 'S4U'",
+    "try { Register-ScheduledTask -TaskName $name -Description 'Ableton Control Deck background service' -Action $direct -Trigger $trigger -Settings $settings -Principal (New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType S4U -RunLevel Limited) | Out-Null } " +
+      `catch { $mode = 'conhost'; $hidden = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument ${quote(`--headless "${executable}" ${argumentLine}`)} -WorkingDirectory ${quote(agent.workingDirectory)}; Register-ScheduledTask -TaskName $name -Description 'Ableton Control Deck background service' -Action $hidden -Trigger $trigger -Settings $settings -Principal (New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited) | Out-Null }`,
+    "Start-ScheduledTask -TaskName $name",
+    "Write-Output $mode",
+  ].join("; ");
+  return run("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], { quiet: true });
+}
+
 if (!args.has("--skip-agents")) {
   heading("Background services");
   const agents = [
@@ -213,36 +254,47 @@ if (!args.has("--skip-agents")) {
     },
   ];
 
-  await mkdir(agentsDirectory, { recursive: true });
-  const uid = process.getuid();
-  for (const agent of agents) {
-    if (!agent.available) {
-      warn(`Skipped ${agent.label} (${agent.hint}).`);
-      continue;
+  if (isWindows) {
+    for (const agent of agents) {
+      if (!agent.available) { warn(`Skipped ${agent.label} (${agent.hint}).`); continue; }
+      const result = registerWindowsTask(agent);
+      if (result.status === 0 && result.stdout.trim().endsWith("conhost")) warn(`${taskName(agent.label)} is running, but this account cannot run background tasks, so Windows will not restart it if it stops. Run setup again after it stops.`);
+      else if (result.status === 0) ok(`${taskName(agent.label)} is running (starts automatically when you sign in)`);
+      else { fail(`Could not start ${taskName(agent.label)}`); console.log(result.stderr || result.stdout); }
     }
-    const target = path.join(agentsDirectory, `${agent.label}.plist`);
-    await writeFile(target, plist(agent.label, agent.programArguments, agent));
-    // Re-running setup must restart services cleanly. bootout is asynchronous —
-    // the label lingers until the process exits — so wait for it to disappear
-    // and give bootstrap a few attempts before declaring failure.
-    run("launchctl", ["bootout", `gui/${uid}/${agent.label}`], { quiet: true });
-    let bootstrap = null;
-    for (let attempt = 0; attempt < 12; attempt++) {
-      const lingering = run("launchctl", ["print", `gui/${uid}/${agent.label}`], { quiet: true });
-      if (lingering.status !== 0) {
-        bootstrap = run("launchctl", ["bootstrap", `gui/${uid}`, target], { quiet: true });
-        if (bootstrap.status === 0) break;
+  } else {
+    await mkdir(agentsDirectory, { recursive: true });
+    const uid = process.getuid();
+    for (const agent of agents) {
+      if (!agent.available) {
+        warn(`Skipped ${agent.label} (${agent.hint}).`);
+        continue;
       }
-      await new Promise(resolve => setTimeout(resolve, 500));
-    }
-    if (bootstrap?.status === 0) ok(`${agent.label} is running (starts automatically at login)`);
-    else {
-      fail(`Could not start ${agent.label}`);
-      if (bootstrap) console.log(bootstrap.stderr || bootstrap.stdout);
+      const target = path.join(agentsDirectory, `${agent.label}.plist`);
+      await writeFile(target, plist(agent.label, agent.programArguments, agent));
+      // Re-running setup must restart services cleanly. bootout is asynchronous —
+      // the label lingers until the process exits — so wait for it to disappear
+      // and give bootstrap a few attempts before declaring failure.
+      run("launchctl", ["bootout", `gui/${uid}/${agent.label}`], { quiet: true });
+      let bootstrap = null;
+      for (let attempt = 0; attempt < 12; attempt++) {
+        const lingering = run("launchctl", ["print", `gui/${uid}/${agent.label}`], { quiet: true });
+        if (lingering.status !== 0) {
+          bootstrap = run("launchctl", ["bootstrap", `gui/${uid}`, target], { quiet: true });
+          if (bootstrap.status === 0) break;
+        }
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      if (bootstrap?.status === 0) ok(`${agent.label} is running (starts automatically at login)`);
+      else {
+        fail(`Could not start ${agent.label}`);
+        if (bootstrap) console.log(bootstrap.stderr || bootstrap.stdout);
+      }
     }
   }
 }
 
+await mkdir(path.dirname(installPathFile), { recursive: true });
 await writeFile(installPathFile, `${root}\n`);
 
 // ------------------------------------------------------------------ summary
@@ -254,7 +306,7 @@ if (failures > 0) {
 
 heading("Setup complete. Two steps left:");
 console.log(`
-  1. Open Live → Settings → Link, Tempo & MIDI and pick “Control Deck” as a
+  1. Open Live → ${isWindows ? "Options → Preferences" : "Settings"} → Link, Tempo & MIDI and pick “Control Deck” as a
      Control Surface (restart Live first if it was open during setup).
   2. Connect your SI agent: open http://127.0.0.1:50713/connect for
      copy-paste instructions for Claude Code, Codex, and every other client.

@@ -1,21 +1,13 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, join } from "node:path";
+import { basename, extname, join, relative, sep } from "node:path";
 import { promisify } from "node:util";
+import { isWindows, pluginFolders } from "./platform.mjs";
 
 const execFileAsync = promisify(execFile);
 
-export const DEFAULT_PLUGIN_ROOTS = [
-  { path: "/Library/Audio/Plug-Ins/VST", format: "VST2", location: "System" },
-  { path: "/Library/Audio/Plug-Ins/VST3", format: "VST3", location: "System" },
-  { path: "/Library/Audio/Plug-Ins/Components", format: "AU", location: "System" },
-  { path: "/Library/Audio/Plug-Ins/CLAP", format: "CLAP", location: "System" },
-  { path: join(process.env.HOME || "", "Library/Audio/Plug-Ins/VST"), format: "VST2", location: "User" },
-  { path: join(process.env.HOME || "", "Library/Audio/Plug-Ins/VST3"), format: "VST3", location: "User" },
-  { path: join(process.env.HOME || "", "Library/Audio/Plug-Ins/Components"), format: "AU", location: "User" },
-  { path: join(process.env.HOME || "", "Library/Audio/Plug-Ins/CLAP"), format: "CLAP", location: "User" }
-];
+export const DEFAULT_PLUGIN_ROOTS = pluginFolders();
 
 export const DEFAULT_PLUGIN_INDEX = new URL("../data/plugin-index.json", import.meta.url);
 
@@ -28,7 +20,7 @@ const EXTENSIONS = new Map([
 
 function cleanBundleName(value) {
   return String(value || "")
-    .replace(/\.(vst3?|component|clap)$/i, "")
+    .replace(/\.(vst3?|component|clap|dll)$/i, "")
     .replace(/[_-]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -47,7 +39,25 @@ function manufacturerFromIdentifier(identifier) {
   return candidate ? titleCase(candidate) : "Unknown";
 }
 
+/** VST3 bundles may carry Contents/Resources/moduleinfo.json with the vendor and version (always on Windows). */
+async function moduleInfo(pluginPath) {
+  try {
+    const info = JSON.parse(await readFile(join(pluginPath, "Contents", "Resources", "moduleinfo.json"), "utf8"));
+    const factory = info["Factory Info"] || {};
+    return {
+      name: cleanBundleName(info.Name || basename(pluginPath)),
+      manufacturer: String(factory.Vendor || "").trim() || "Unknown",
+      version: String(info.Version || "").trim()
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function bundleMetadata(pluginPath) {
+  if (isWindows) {
+    return (await moduleInfo(pluginPath)) || { name: cleanBundleName(basename(pluginPath)), manufacturer: "Unknown", version: "" };
+  }
   const plist = join(pluginPath, "Contents", "Info.plist");
   try {
     const { stdout } = await execFileAsync("/usr/bin/plutil", ["-convert", "json", "-o", "-", plist], {
@@ -86,10 +96,12 @@ async function findPluginBundles(root) {
     for (const entry of entries) {
       if (entry.name.startsWith(".")) continue;
       const fullPath = join(current, entry.name);
-      const detectedFormat = EXTENSIONS.get(extname(entry.name).toLowerCase());
+      const extension = extname(entry.name).toLowerCase();
+      // On Windows a VST2 plug-in is a plain .dll inside a VST2 folder.
+      const detectedFormat = EXTENSIONS.get(extension) || (isWindows && root.format === "VST2" && extension === ".dll" && entry.isFile() ? "VST2" : undefined);
       if (detectedFormat) {
         found.push({ path: fullPath, format: detectedFormat || root.format, location: root.location });
-      } else if (entry.isDirectory() && dirname(fullPath).split("/").length - root.path.split("/").length < 3) {
+      } else if (entry.isDirectory() && relative(root.path, fullPath).split(sep).length <= 3) {
         queue.push(fullPath);
       }
     }

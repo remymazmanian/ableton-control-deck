@@ -72,15 +72,15 @@ Setup guards the common traps: it refuses to run from Downloads/Desktop (service
 
 ## Setting up Live
 
-Setup installs the remote script into Live's default User Library location (`~/Music/Ableton/User Library/Remote Scripts/Control_Deck/`), so Live can already see it. Then:
+Setup installs the remote script into the User Library that Live's settings point to (by default `~/Music/Ableton/User Library/Remote Scripts/Control_Deck/` on macOS and `Documents\Ableton\User Library\Remote Scripts\Control_Deck\` on Windows, which is often in OneDrive), so Live can already see it. Then:
 
-1. In Live, open **Settings** (Live → Settings, or `⌘,`) → **Link, Tempo & MIDI**.
+1. In Live, open **Settings** (Live → Settings, or `⌘,`; on Windows Options → Preferences, or `Ctrl+,`) → **Link, Tempo & MIDI**.
 2. In a free **Control Surface** slot, choose **Control Deck**. Leave the Input and Output ports set to **None** — the bridge communicates over local UDP, not MIDI.
-3. If Live was already open while setup ran, restart Live once (or re-select the Control Surface) so it loads the freshly stamped script.
+3. If Live was already open while setup ran, restart Live once (or re-select the Control Surface) so it loads the new script.
 
-**Verifying and reloading.** The dashboard's Deck page flips to "Live is linked." the moment the bridge is up — that's the quickest end-to-end check. Live's own log (`Log.txt`) records `(Control Deck Bridge) 1.4.0 listening on 127.0.0.1:50711` (with the installed version). After re-running setup (which re-stamps the secret or updates the script), **restart Live** — Live caches remote-script code for the whole process lifetime, so toggling the Control Surface slot re-enables the bridge but does not load updated script code.
+**Verifying and reloading.** The dashboard's Deck page flips to "Live is linked." the moment the bridge is up — that's the quickest end-to-end check. Live's own log (`Log.txt`) records `(Control Deck Bridge) 1.4.0 listening on 127.0.0.1:50711` (with the installed version). After re-running setup (which may update the script), **restart Live** — Live caches remote-script code for the whole process lifetime, so toggling the Control Surface slot re-enables the bridge but does not load updated script code.
 
-**If Control Deck isn't listed** in the Control Surface dropdown, the script folder is missing or in a non-default User Library. Check that `~/Music/Ableton/User Library/Remote Scripts/Control_Deck/` exists; if you've moved your User Library, copy the setup-installed `Control_Deck` folder into `<your User Library>/Remote Scripts/` — but always the setup-installed copy, never the repo folder, which has no secret stamped in.
+**If Control Deck isn't listed** in the Control Surface dropdown, the script folder is missing or in a non-default User Library. Setup reads the User Library location from Live's `Library.cfg`, so open Live once and run setup again. Its output names the folder it used.
 
 ## Everyday use
 
@@ -386,14 +386,14 @@ WAV, AIFF/AIF, MP3, and FLAC files are cataloged. Source audio is read-only — 
 | What | Where |
 |---|---|
 | The install (never move without re-running setup) | wherever you placed the folder |
-| Per-install secret | `<install>/data/bridge-token` |
+| Per-machine secret | macOS `~/Library/Application Support/Ableton Control Deck/bridge-token`; Windows `%LOCALAPPDATA%\Ableton Control Deck\bridge-token` |
 | Plug-in inventory | `<install>/data/plugin-index.json` |
 | Sample index | `<install>/data/samples.sqlite` |
 | MCP request log | `<install>/logs/control-deck.jsonl` |
-| Remote script (installed copy) | `~/Music/Ableton/User Library/Remote Scripts/Control_Deck/` |
+| Remote script (installed copy) | `<User Library>/Remote Scripts/Control_Deck/` |
 | OmniHost device (installed copy) | `~/Music/Ableton/User Library/Presets/Instruments/Max Instrument/Control Deck/` |
-| Launch agents | `~/Library/LaunchAgents/com.abletondeck.{api,dashboard}.plist` |
-| Service logs | `/tmp/com.abletondeck.*.log` and `.error.log` |
+| Services | macOS `~/Library/LaunchAgents/com.abletondeck.{api,dashboard}.plist`; Windows Task Scheduler "Ableton Control Deck API" and "… Dashboard" |
+| Service logs | macOS `/tmp/com.abletondeck.*.log` and `.error.log` |
 | Wrapper app (optional) | built to `<install>/build/`, typically copied to `/Applications` |
 
 Ports (all loopback-only): `50711/udp` bridge, `50712/tcp` status API, `50713/tcp` dashboard, `50714/udp` OmniHost.
@@ -402,11 +402,11 @@ Ports (all loopback-only): `50711/udp` bridge, `50712/tcp` status API, `50713/tc
 
 **The deck says "waiting for Ableton Live."** Live isn't open, or the Control Surface isn't active. In Live: Settings → Link, Tempo & MIDI → confirm **Control Deck** is selected in a Control Surface slot. If it's missing from the dropdown, run setup again and restart Live.
 
-**"AUTH_INVALID" / authentication failed.** The remote script and your services disagree about the secret — usually a script installed before the current `data/bridge-token`. Run setup again (it re-stamps the script), then restart Live or toggle the Control Surface off and on.
+**"AUTH_INVALID" / authentication failed.** The remote script and your services disagree about the secret. Run setup again, then try once more; the script rereads the secret file when a request doesn't match.
 
-**The bridge refuses to start and mentions a missing token.** The repo copy of the remote script was copied into Live by hand instead of through setup, so the secret placeholder was never stamped. Run setup; never copy `remote-script/Control_Deck/` into Live manually.
+**The bridge refuses to start and mentions a missing token.** This computer has no bridge secret yet. Run setup, then restart Live.
 
-**Dashboard won't load.** Check the services: `launchctl print gui/$(id -u)/com.abletondeck.dashboard` (and `.api`). Logs live in `/tmp/com.abletondeck.*.error.log`. `launchctl kickstart -k gui/$(id -u)/<label>` restarts one. Re-running setup fixes most states.
+**Dashboard won't load.** Check the services: `launchctl print gui/$(id -u)/com.abletondeck.dashboard` (and `.api`). Logs live in `/tmp/com.abletondeck.*.error.log`. `launchctl kickstart -k gui/$(id -u)/<label>` restarts one. Re-running setup fixes most states. On Windows, run `Get-ScheduledTask -TaskName 'Ableton Control Deck*'` in PowerShell, or look for the two tasks in Task Scheduler.
 
 **Everything broke after moving or renaming the folder.** Expected — services pin absolute paths. Run setup from the new location (it detects the move and refreshes), and re-register the MCP server in your agent since its path changed too.
 
@@ -430,7 +430,17 @@ launchctl bootout gui/$(id -u)/com.abletondeck.dashboard
 rm ~/Library/LaunchAgents/com.abletondeck.*.plist
 rm -rf ~/Music/Ableton/"User Library"/"Remote Scripts"/Control_Deck
 rm -rf ~/Music/Ableton/"User Library"/Presets/Instruments/"Max Instrument"/"Control Deck"
+rm -rf ~/Library/"Application Support"/"Ableton Control Deck"
 ```
+
+On Windows, in PowerShell:
+
+```powershell
+Unregister-ScheduledTask -TaskName 'Ableton Control Deck*' -Confirm:$false
+Remove-Item -Recurse "$env:LOCALAPPDATA\Ableton Control Deck"
+```
+
+Then delete `Remote Scripts\Control_Deck` from your User Library.
 
 Then delete the install folder, remove the wrapper app from `/Applications` if you copied it there, and remove the server from your agent (for Claude Code: `claude mcp remove ableton`). Control Deck writes nowhere else.
 

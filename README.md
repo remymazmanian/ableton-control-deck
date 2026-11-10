@@ -62,7 +62,7 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 
 ## Requirements
 
-- **macOS 13 Ventura or newer** (Apple silicon and Intel) — macOS is the only supported platform today. The core is platform-neutral and a Linux/Windows port is well-scoped; see [PORTING.md](PORTING.md).
+- **macOS 13 Ventura or newer** (Apple silicon and Intel), or **Windows 10 or 11** (x64 and Arm64). AU plug-ins are macOS-only.
 - Ableton Live 11 or newer (tested target: Live 12)
 - Node.js 20+
 - Max for Live (optional — only for the OmniHost device)
@@ -75,13 +75,13 @@ Full documentation — component descriptions, Live setup, the complete MCP tool
 
 1. **Install Node.js** — download the LTS version from [nodejs.org](https://nodejs.org) and run its installer with the default options. (Control Deck runs on it; you never have to touch it again.)
 2. **Download Control Deck** — use GitHub's green **Code → Download ZIP** button, unzip it, and move the folder somewhere permanent, like your home folder. Don't leave it in Downloads — the installer pins services to the folder's location and will ask you to move it.
-3. **Run the installer** — right-click `Install Ableton Control Deck.command` and choose **Open** (macOS requires the right-click the first time for downloaded files). It installs everything, starts the background services, and opens the connection guide when it's done. It's safe to run again at any time.
-4. **Enable the Control Surface in Live** — Settings → Link, Tempo & MIDI → pick **Control Deck** in a free Control Surface slot (restart Live first if it was open during setup).
+3. **Run the installer** — on macOS, right-click `Install Ableton Control Deck.command` and choose **Open** (macOS requires the right-click the first time for downloaded files). On Windows, double-click `Install Ableton Control Deck.cmd`. It installs everything, starts the background services, and opens the connection guide when it's done. It's safe to run again at any time.
+4. **Enable the Control Surface in Live** — Settings (Options → Preferences on Windows) → Link, Tempo & MIDI → pick **Control Deck** in a free Control Surface slot (restart Live first if it was open during setup).
 5. **Connect your SI agent** — the guide that opened ([http://127.0.0.1:50713/connect](http://127.0.0.1:50713/connect)) has copy-paste instructions for every client.
 
 ### Developer setup
 
-`npm run setup` is the same engine the installer uses — dependency install, TypeScript + OmniHost + dashboard builds, per-install secret, remote-script install, and launchd agents (written *and* activated). It's idempotent; re-run it after pulling changes or moving the checkout.
+`npm run setup` is the same engine the installer uses — dependency install, TypeScript + OmniHost + dashboard builds, per-machine secret, remote-script install, and background services (launchd agents on macOS, Task Scheduler tasks on Windows), written *and* started. It's idempotent; re-run it after pulling changes or moving the checkout.
 
 ```sh
 npm run setup
@@ -91,9 +91,9 @@ Flags for a tighter loop: `--skip-build` (no npm installs/builds), `--skip-remot
 
 What setup manages:
 
-1. a per-install secret at `data/bridge-token` (shared by the remote script and clients; never committed),
-2. the remote script (secret stamped in) at `~/Music/Ableton/User Library/Remote Scripts/Control_Deck/`,
-3. two launchd agents pointing at this checkout: `com.abletondeck.api` and `com.abletondeck.dashboard`.
+1. a per-machine secret, shared by the remote script and clients and never committed: `~/Library/Application Support/Ableton Control Deck/bridge-token` on macOS, `%LOCALAPPDATA%\Ableton Control Deck\bridge-token` on Windows. It stays out of the User Library, which is often synced to the cloud. An older `data/bridge-token` is moved there unchanged.
+2. the remote script, in the User Library that Live's own settings point to (`Remote Scripts/Control_Deck/`),
+3. two services pointing at this checkout: launchd agents `com.abletondeck.api` and `com.abletondeck.dashboard` on macOS, or the Task Scheduler tasks "Ableton Control Deck API" and "Ableton Control Deck Dashboard" on Windows. The Windows tasks start at sign-in, run without a window, and restart if they stop.
 
 Then add the MCP server to your client. For example, for Claude Code:
 
