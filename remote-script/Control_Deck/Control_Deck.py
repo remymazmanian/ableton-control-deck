@@ -15,7 +15,7 @@ from .session_ops import SESSION_COMMANDS, SESSION_QUERIES, SessionOps
 
 
 SCRIPT_NAME = "Control Deck Bridge"
-SCRIPT_VERSION = "1.2.0"
+SCRIPT_VERSION = "1.3.0"
 PROTOCOL = "ableton-control-deck/1"
 HOST = "127.0.0.1"
 PORT = 50711
@@ -181,7 +181,7 @@ class ControlDeckBridge(SessionOps, ControlSurface):
             "pluginLoading": True,
             "capabilities": [
                 "live-control", "read-back-verification", "plugin-browser", "plugin-loading", "user-device-loading",
-                "mixer", "session-launch", "scenes", "clip-properties", "undo", "track-routing", "session-notes", "return-tracks",
+                "mixer", "session-launch", "scenes", "clip-properties", "undo", "track-routing", "session-notes", "return-tracks", "sample-loading", "device-control",
             ],
         }
 
