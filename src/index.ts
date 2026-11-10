@@ -13,7 +13,8 @@ import { OmnihostClient } from "./omnihost-client.js";
 import { OmnihostTools } from "./omnihost-tools.js";
 import { LAUNCH_MODES, LAUNCH_QUANTIZATIONS, WARP_MODES } from "./session-tools.js";
 import { QUANTIZE_GRIDS } from "./note-tools.js";
-import { MidiFileTools } from "./midi-tools.js";
+import { TheoryTools } from "./theory-tools.js";
+import { DRUM_STYLES, SCALES } from "./theory.js";
 import { RECORD_QUANTIZATIONS } from "./song-tools.js";
 import { MAX_NOTES_PER_CALL } from "./note-chunks.js";
 import { fromProjectRoot } from "./paths.js";
@@ -27,7 +28,7 @@ const samples = new SampleIndex();
 const local = new LocalCapabilities();
 const plugins = new PluginTools(ableton, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
 const omnihostClient = new OmnihostClient();
-const session = new MidiFileTools(ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1", async id => String((await samples.getMetadata({ id }) as { path: string }).path));
+const session = new TheoryTools(ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1", async id => String((await samples.getMetadata({ id }) as { path: string }).path));
 const omnihost = new OmnihostTools(omnihostClient, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
 const server = new McpServer({ name: "ableton-control-deck", version });
 const response = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }], structuredContent: value as Record<string, unknown> });
@@ -153,6 +154,15 @@ server.tool("export_clip_midi", "Write a Session MIDI clip's notes to a Standard
 server.tool("import_midi_file", "Create a Session MIDI clip from a .mid file in an empty slot, by track index and current name. If the file has more than one track with notes, pass midiTrack (the error lists them). The clip is as long as the notes, rounded up to whole bars, unless lengthBeats is given. Every note is read back.", {
   path: z.string().min(1), trackIndex: z.number().int().min(0), sceneIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), midiTrack: z.number().int().min(0).optional(), clipName: z.string().min(1).max(128).optional(), lengthBeats: z.number().positive().optional(), dryRun: z.boolean().default(false)
 }, async input => response(await session.importMidiFile(input)));
+const newClipTarget = { trackIndex: z.number().int().min(0), sceneIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), clipName: z.string().min(1).max(128).optional(), dryRun: z.boolean().default(false) };
+server.tool("write_chord_progression", "Write a chord progression as a new Session MIDI clip in an empty slot. progression is Roman numerals, such as \"I V vi IV\" or \"i bVI bIII bVII\" (case sets major or minor; suffixes 7, maj7, ø7, °, °7, +, sus2, sus4, add9). key and scale default to the song's (Live 12). Chords are voiced to move as little as possible. rhythm is sustain, stabs, offbeats, or arpeggio; bass adds the root an octave below. Every note is read back.", {
+  ...newClipTarget, progression: z.string().min(1), key: z.union([z.string(), z.number().int().min(0).max(11)]).optional(), scale: z.enum(Object.keys(SCALES) as [string, ...string[]]).optional(),
+  beatsPerChord: z.number().min(0.5).max(32).optional(), rhythm: z.enum(["sustain", "stabs", "offbeats", "arpeggio"]).optional(), bass: z.boolean().optional(), velocity: z.number().int().min(1).max(127).optional(), centre: z.union([z.number().int().min(24).max(96), z.string()]).optional()
+}, async input => response(await session.writeChordProgression(input)));
+server.tool("write_drum_pattern", "Write a drum pattern as a new Session MIDI clip in an empty slot: four-on-the-floor, house, boom-bap, trap, or breakbeat, for 1-16 bars, with swing (0-100%) and accents. On a Drum Rack (the first device, or inside the first rack as factory kits are) the kick, snare, clap, and hat pads are found by name; otherwise General MIDI notes are used. notes overrides any instrument's note. Every note is read back.", {
+  ...newClipTarget, style: z.enum(Object.keys(DRUM_STYLES) as [string, ...string[]]), bars: z.number().int().min(1).max(16).optional(), swing: z.number().min(0).max(100).optional(), velocity: z.number().int().min(1).max(127).optional(),
+  usePads: z.boolean().optional(), notes: z.record(z.string(), z.number().int().min(0).max(127)).optional()
+}, async input => response(await session.writeDrumPattern(input)));
 
 server.tool("get_undo_state", "Report whether Live can undo or redo.", {}, async () => response(await session.getUndoState()));
 server.tool("undo", "Undo Live's most recent step. Most Control Deck changes are one undo step (set_time_signature and add_locator are two), and the most recent step may be a change made by hand in Live.", { dryRun }, async ({ dryRun }) => response(await session.undo(dryRun)));

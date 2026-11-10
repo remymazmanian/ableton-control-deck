@@ -242,6 +242,13 @@ MIDI files:
 - **export_clip_midi** — Write a Session MIDI clip's notes to a Standard MIDI File (`.mid`) at an absolute path, with the song's tempo and time signature and the clip's name. Muted notes are left out. An existing file is only replaced with `overwrite: true`. The file is read back to check that every note is in it.
 - **import_midi_file** — Create a Session MIDI clip from a `.mid` file in an empty slot. If the file has more than one track with notes, pass `midiTrack`; the error lists them. The clip is as long as the notes, rounded up to whole bars, unless `lengthBeats` is given. Large files are added in batches and every note is read back.
 
+Writing music:
+
+- **write_chord_progression** — Write Roman numerals (`I V vi IV`, `i bVI bIII bVII`, `ii7 V7 Imaj7`) as a new clip. Upper case is major and lower case minor; suffixes are `7`, `maj7`, `ø7`, `°`, `°7`, `+`, `sus2`, `sus4`, and `add9`. A plain numeral is the scale's own degree; a flat or sharp is measured from the major scale, as usually written, so `bVI` in C minor is A♭. `key` and `scale` default to the song's (Live 12). Each chord takes the inversion closest to the last, so voices move as little as possible. `rhythm` is `sustain`, `stabs`, `offbeats`, or `arpeggio`; `bass` adds the root an octave below; `centre` moves the voicing up or down.
+- **write_drum_pattern** — Write `four-on-the-floor`, `house`, `boom-bap`, `trap`, or `breakbeat` for 1–16 bars as a new clip, with swing (0–100%, up to a triplet feel) and accents. On a Drum Rack, as the first device or inside the first rack as factory kits are, the kick, snare, clap, and hat pads are found by name, keeping open and closed hats apart; otherwise General MIDI notes are used. `notes` overrides any instrument's note.
+
+Both write into an empty slot and read every note back.
+
 Files are written at 960 ticks per beat, so times survive a round trip to within about 0.0005 beats. Formats 0 and 1 are read; SMPTE-timed files are not.
 
 Transpose and humanize read every changed note back, and large edits are split into batches that fit one datagram.
