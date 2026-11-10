@@ -23,6 +23,8 @@ interface FakeState {
   /** Simulates Live trimming an overlapped clip when a sample is loaded. */
   sampleLength: number;
   simplerFile: string | null;
+  /** Devices on track 0 (Drums): name, enabled (null when a device has no switch). */
+  devices: Array<[string, boolean | null]>;
 }
 
 const db = (value: number) => (value <= 0 ? "-inf dB" : `${((value - 0.85) * 40).toFixed(1)} dB`);
@@ -45,6 +47,7 @@ function fakeLive(overrides: Partial<FakeState> = {}) {
     arrangement: [["Verse", 16, 32]],
     sampleLength: 4,
     simplerFile: "/old.wav",
+    devices: [["EQ Eight", true], ["Compressor", true]],
     ...overrides
   };
   const sent: Array<{ address: string; args: unknown[] }> = [];
@@ -94,6 +97,8 @@ function fakeLive(overrides: Partial<FakeState> = {}) {
         undoStack.push(() => { state.arrangement = [["Verse", 16, 32]]; });
       }
       if (address === "/live/song/undo") undoStack.pop()?.();
+      if (address === "/live/device/set_enabled") state.devices[Number(args[3])][1] = args[5] === true;
+      if (address === "/live/device/delete") state.devices.splice(Number(args[3]), 1);
       if (address === "/live/device/replace_sample") state.simplerFile = String(args[4]);
       if (address === "/live/song/delete_scene") state.scenes.splice(Number(args[0]), 1);
       // Live reads a return track's name back with its letter, such as "B-Plate".
@@ -141,6 +146,7 @@ function fakeLive(overrides: Partial<FakeState> = {}) {
       if (address === "/live/song/get/scenes/name") return { args: state.scenes.map(scene => scene.name) };
       if (address === "/live/session/get/playback") return { args: [state.tracks.length, ...state.tracks.flatMap(track => [track.name, track.playing, track.fired]), state.scenes.length, ...state.scenes.map(scene => scene.triggered)] };
       if (address === "/live/track/get/arrangement_clips") return { args: [args[0], ...(Number(args[0]) === 1 ? state.arrangement.flatMap(([name, start, end]) => [name, start, end, "audio"]) : [])] };
+      if (address === "/live/devices/get/state") return { args: [args[0], args[1], "Drums", state.devices.length, ...state.devices.flatMap(([name, enabled]) => [name, "Eq8", enabled])] };
       if (address === "/live/track/get/devices/name") return { args: [args[0], "EQ Eight", "Simpler"] };
       if (address === "/live/device/get/sample") return { args: [args[0], args[2], "Simpler", state.simplerFile] };
       if (address === "/live/session_clip/get/notes") return { args: [args[0], args[1], "Beat", ...state.notes.flat()] };
@@ -439,5 +445,37 @@ describe("sample loading", () => {
     expect(result).toMatchObject({ ok: true, data: { previousFile: "/old.wav", file: realKick, deviceName: "Simpler" } });
     const again = await new SessionTools(fakeLive({ simplerFile: realKick }) as never, logger as never).replaceSimplerSample({ trackIndex: 0, expectedTrackName: "Drums", deviceIndex: 1, expectedDeviceName: "Simpler", path: kick });
     expect(again).toMatchObject({ ok: false, error: { message: expect.stringMatching(/already plays/) } });
+  });
+});
+
+describe("devices", () => {
+  const eq = { trackIndex: 0, expectedTrackName: "Drums", deviceIndex: 0, expectedDeviceName: "EQ Eight" };
+
+  it("lists devices with their on/off state", async () => {
+    const result = await new SessionTools(fakeLive({ devices: [["EQ Eight", true], ["Utility", null]] }) as never, logger as never).getDevices({ trackIndex: 0 });
+    expect(result).toMatchObject({ ok: true, data: { trackName: "Drums", devices: [{ deviceIndex: 0, name: "EQ Eight", enabled: true }, { deviceIndex: 1, name: "Utility", enabled: null }] } });
+  });
+
+  it("turns a device off and reads it back", async () => {
+    const live = fakeLive();
+    const result = await new SessionTools(live as never, logger as never).setDeviceEnabled({ ...eq, enabled: false });
+    expect(live.sent[0]).toEqual({ address: "/live/device/set_enabled", args: ["track", 0, "Drums", 0, "EQ Eight", false] });
+    expect(result).toMatchObject({ ok: true, data: { before: true, enabled: false } });
+  });
+
+  it("refuses a stale device name, a missing device, or a device without a switch", async () => {
+    const live = fakeLive({ devices: [["EQ Eight", true], ["Utility", null]] });
+    const tools = new SessionTools(live as never, logger as never);
+    expect(await tools.setDeviceEnabled({ ...eq, expectedDeviceName: "Reverb", enabled: false })).toMatchObject({ ok: false, error: { message: expect.stringMatching(/found 'EQ Eight'/) } });
+    expect(await tools.setDeviceEnabled({ ...eq, deviceIndex: 4, enabled: false })).toMatchObject({ ok: false, error: { message: expect.stringMatching(/has 2 device/) } });
+    expect(await tools.setDeviceEnabled({ ...eq, deviceIndex: 1, expectedDeviceName: "Utility", enabled: false })).toMatchObject({ ok: false, error: { message: expect.stringMatching(/no on\/off switch/) } });
+    expect(live.send).not.toHaveBeenCalled();
+  });
+
+  it("deletes a device only with confirm and reads the chain back", async () => {
+    const live = fakeLive();
+    const tools = new SessionTools(live as never, logger as never);
+    expect(await tools.deleteDevice({ ...eq, confirm: false })).toMatchObject({ ok: false, error: { message: expect.stringMatching(/confirm=true/) } });
+    expect(await tools.deleteDevice({ ...eq, confirm: true })).toMatchObject({ ok: true, data: { deleted: { name: "EQ Eight" }, devices: [{ deviceIndex: 0, name: "Compressor" }] } });
   });
 });

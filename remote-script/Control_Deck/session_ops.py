@@ -39,6 +39,7 @@ SESSION_QUERIES = (
     "/live/session_clip/get/notes",
     "/live/song/get/api_features",
     "/live/device/get/sample",
+    "/live/devices/get/state",
 )
 SESSION_COMMANDS = (
     "/live/mixer/set",
@@ -64,6 +65,8 @@ SESSION_COMMANDS = (
     "/live/clip_slot/load_sample",
     "/live/track/load_sample_to_arrangement",
     "/live/device/replace_sample",
+    "/live/device/set_enabled",
+    "/live/device/delete",
 )
 # Undo and redo move through Live's history, so they must not open a step of their own.
 # Same limit as Control_Deck.MAX_ARRANGEMENT_BEATS (importing it here would be circular).
@@ -99,6 +102,8 @@ class SessionOps(object):
             return self._api_features()
         if address == "/live/device/get/sample":
             return self._device_sample(args)
+        if address == "/live/devices/get/state":
+            return self._devices_state(args)
         raise BridgeError("ADDRESS_NOT_ALLOWED", "Unsupported Live query: %s" % address)
 
     def _session_command(self, address, args):
@@ -126,6 +131,8 @@ class SessionOps(object):
             "/live/clip_slot/load_sample": self._load_sample_to_slot,
             "/live/track/load_sample_to_arrangement": self._load_sample_to_arrangement,
             "/live/device/replace_sample": self._replace_simpler_sample,
+            "/live/device/set_enabled": self._set_device_enabled,
+            "/live/device/delete": self._delete_device,
         }
         handler = handlers.get(address)
         if handler is None:
@@ -982,3 +989,53 @@ class SessionOps(object):
         path = self._sample_path(args[4])
         self._require_method(device, "replace_sample", "Replacing a Simpler sample")
         device.replace_sample(path)
+
+    # ------------------------------------------------------------------ device on/off and delete
+
+    def _device_switch(self, device):
+        # Every Live device's first parameter is its on/off switch, named "Device On".
+        parameters = list(getattr(device, "parameters", []) or [])
+        if parameters and str(parameters[0].name) == "Device On":
+            return parameters[0]
+        return None
+
+    def _devices_state(self, args):
+        # args: kind, index. Reply: kind, index, trackName, count, then name, class_name, enabled (None if it has no switch).
+        kind, index, track = self._any_track(args)
+        devices = list(track.devices)
+        values = [kind, index, track.name, len(devices)]
+        for device in devices:
+            switch = self._device_switch(device)
+            values.extend([device.name, str(getattr(device, "class_name", "")), None if switch is None else bool(switch.value >= 0.5)])
+        return values
+
+    def _named_device(self, args):
+        # args: kind, index, trackName, deviceIndex, deviceName
+        self._require_args(args, 5, "device operation")
+        kind, index, track = self._named_any_track(args)
+        device_index = self._non_negative_index(args[3], "Device index")
+        devices = list(track.devices)
+        if device_index >= len(devices):
+            raise BridgeError("INVALID_DEVICE", "Device index %d does not exist on %s '%s'" % (device_index, self._kind_label(kind), track.name))
+        device = devices[device_index]
+        if device.name != str(args[4]):
+            raise BridgeError("DEVICE_IDENTITY_MISMATCH", "Expected device %d to be '%s', found '%s'" % (device_index, args[4], device.name))
+        return kind, track, device_index, device
+
+    def _set_device_enabled(self, args):
+        # args: kind, index, trackName, deviceIndex, deviceName, enabled
+        self._require_args(args, 6, "/live/device/set_enabled")
+        _kind, _track, _device_index, device = self._named_device(args)
+        enabled = self._flag(args[5], "enabled")
+        switch = self._device_switch(device)
+        if switch is None:
+            raise BridgeError("DEVICE_NO_SWITCH", "Device '%s' has no on/off switch" % device.name)
+        switch.value = switch.max if enabled else switch.min
+
+    def _delete_device(self, args):
+        # args: kind, index, trackName, deviceIndex, deviceName, confirm
+        self._require_args(args, 6, "/live/device/delete")
+        _kind, track, device_index, _device = self._named_device(args)
+        self._confirmed(args[5], "delete_device")
+        self._require_method(track, "delete_device", "Deleting a device")
+        track.delete_device(device_index)

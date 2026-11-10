@@ -251,6 +251,9 @@ That removes notes of pitch 60 (C3) whose start is in the half-open beat range `
 ### Devices & parameters
 
 - **list_devices** — List top-level devices on a track.
+- **get_devices** — List the top-level devices on a track, return track, or the master, with each one's index, name, type, and whether it is on (`null` for a device with no on/off switch).
+- **set_device_enabled** — Turn a device on or off with its Device On switch, by track and device index and their current names. The state is read back.
+- **delete_device** — Delete a top-level device, by track and device index and their current names; needs `confirm: true`. The remaining chain is read back. Devices inside racks are not reached.
 - **get_device_parameters / list_device_parameters** — List every parameter Live exposes for a specific device.
 - **set_device_parameter** — Set an exposed parameter using stable indices and a required expected-device-name safeguard.
 - **list_plugin_devices** — List loaded third-party plug-in devices, optionally restricted to one track.
