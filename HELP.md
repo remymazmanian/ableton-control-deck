@@ -120,6 +120,12 @@ All tools follow the same contract: **exact targets** (mutations require indices
 - **select** — Select a track, a scene, or both, by index and current name, and read the selection back. Selecting both highlights that clip slot. Selection changes Live's view, not the set, so it is not an undo step.
 - **get_view** — Which main view Live shows (`session` or `arrangement`), and whether the Detail view (clip editor or devices) and the Browser are showing.
 - **show_view** — Switch between the Session (clip launch) view and the Arrangement view, show the clip editor or the device chain or hide the Detail view, and show or hide the Browser, in one call. The view is read back. Like selection, it changes Live's window, not the set, so it is not an undo step.
+
+### Song settings
+
+- **get_song_settings** — The key and scale (Live 12), scale mode and the scale's intervals, groove amount, the Arrangement loop (on, start, and length in beats), punch in and out, Arrangement overdub, Session automation arm, MIDI record quantization, and whether Capture MIDI and Re-Enable Automation are available.
+- **set_song_settings** — Change any of these in one undo step: `key` (`F#`, `Bb`, or 0–11), `scale` (a name from Live's Scale menu, such as `Major` or `Dorian`), `scaleMode`, `groovePercent` (0–131), `loop` (`enabled`, `startBeats`, `lengthBeats`), `punchIn`, `punchOut`, `arrangementOverdub`, `sessionAutomationRecord`, and `recordQuantization` (`none`, `1/4` … `1/32`). Every value is checked first and read back; Live ignores a scale name it does not know, and the result says so.
+- **song_action** — `capture_midi` (Live's Capture MIDI), `re_enable_automation`, or `back_to_arrangement`. Capture MIDI and Re-Enable Automation say so when there is nothing to do.
 - **get_transport** — Playback, position, tempo, metronome, recording, and loop state.
 - **get_time_signature** — The current time signature.
 
@@ -222,6 +228,16 @@ Live names an untitled track after the first clip or sample it gets (`3-Audio` b
 - **remove_clip_notes** — Remove the notes whose start lies in a pitch and time range. The end of each range is exclusive. The result lists the removed note ids.
 
 Together with `add_midi_notes`, these give Session clips the same note editing as Arrangement clips.
+
+Note tools for Session clips:
+
+- **quantize_clip** — Live's own Quantize (Cmd-U) to a grid: `1/4`, `1/8`, `1/8T`, `1/8+1/8T`, `1/16`, `1/16T`, `1/16+1/16T`, or `1/32`, with an amount in percent (100 by default). Pass `pitch` (a number or a name such as `C1`) to quantize one note only. On an audio clip it quantizes the warp markers.
+- **transpose_clip_notes** — Transpose by semitones, optionally only notes in a pitch range (inclusive) or starting in a time range. Refused if any note would leave MIDI 0–127.
+- **humanize_clip_notes** — Shift each note's start by up to `timing` beats (0.01 by default) and its velocity by up to `velocity` (8 by default). The result includes the seed; the same seed gives the same result.
+- **duplicate_clip_loop** — Double the loop and copy its notes into the new half, like Live's Duplicate Loop.
+- **crop_clip** — Remove everything outside the loop (or the markers, when the clip isn't looping) and move what's left to start at 0, like Live's Crop Clip. Needs `confirm: true`. Live 12.4.16's `Clip.crop()` left MIDI clips unchanged, so MIDI clips are cropped by the bridge itself in one undo step; audio clips use Live's crop, and the call fails if Live leaves the clip where it was.
+
+Transpose and humanize read every changed note back, and large edits are split into batches that fit one datagram.
 
 Colors are hex RGB such as `#FF8800`. Live snaps a color to its own palette, so `set_clip`, `set_track`, and `set_scene` report the color Live chose and `colorSnapped: true` when it differs from the one asked for (for example, `#34C759` becomes `#539F31`).
 

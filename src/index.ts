@@ -12,7 +12,8 @@ import { PluginTools } from "./plugin-tools.js";
 import { OmnihostClient } from "./omnihost-client.js";
 import { OmnihostTools } from "./omnihost-tools.js";
 import { LAUNCH_MODES, LAUNCH_QUANTIZATIONS, WARP_MODES } from "./session-tools.js";
-import { AutomationTools } from "./automation-tools.js";
+import { QUANTIZE_GRIDS } from "./note-tools.js";
+import { RECORD_QUANTIZATIONS, SongTools } from "./song-tools.js";
 import { MAX_NOTES_PER_CALL } from "./note-chunks.js";
 import { fromProjectRoot } from "./paths.js";
 
@@ -25,7 +26,7 @@ const samples = new SampleIndex();
 const local = new LocalCapabilities();
 const plugins = new PluginTools(ableton, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
 const omnihostClient = new OmnihostClient();
-const session = new AutomationTools(ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1", async id => String((await samples.getMetadata({ id }) as { path: string }).path));
+const session = new SongTools(ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1", async id => String((await samples.getMetadata({ id }) as { path: string }).path));
 const omnihost = new OmnihostTools(omnihostClient, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
 const server = new McpServer({ name: "ableton-control-deck", version });
 const response = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }], structuredContent: value as Record<string, unknown> });
@@ -133,6 +134,18 @@ server.tool("remove_clip_notes", "Remove notes from a Session MIDI clip whose st
   ...clipTarget,
   fromPitch: z.number().int().min(0).max(127), pitchSpan: z.number().int().min(1).max(128), fromTime: z.number().min(0), timeSpan: z.number().positive(), dryRun
 }, async input => response(await session.removeClipNotes(input)));
+const noteFilter = { fromPitch: z.number().int().min(0).max(127).optional(), toPitch: z.number().int().min(0).max(127).optional(), fromTime: z.number().min(0).optional(), toTime: z.number().positive().optional() };
+server.tool("quantize_clip", "Quantize a Session clip's notes (or an audio clip's warp markers) to a grid with Live's own Quantize, like Cmd-U. amount is a percentage (default 100). Pass pitch (a number or a name such as C1) to quantize only that note.", {
+  ...clipTarget, grid: z.enum(QUANTIZE_GRIDS), amount: z.number().min(0).max(100).default(100), pitch: z.union([z.number().int().min(0).max(127), z.string()]).optional(), dryRun
+}, async input => response(await session.quantizeClip(input)));
+server.tool("transpose_clip_notes", "Transpose a Session MIDI clip's notes by semitones, optionally only notes in a pitch range (inclusive) or starting in a time range. Refused if any note would leave MIDI 0-127. Every note is read back.", {
+  ...clipTarget, ...noteFilter, semitones: z.number().int().min(-127).max(127), dryRun
+}, async input => response(await session.transposeClipNotes(input)));
+server.tool("humanize_clip_notes", "Loosen a Session MIDI clip's notes: shift each start by up to timing beats (default 0.01) and each velocity by up to velocity (default 8), optionally only notes in a pitch or time range. Returns the seed; the same seed gives the same result. Every note is read back.", {
+  ...clipTarget, ...noteFilter, timing: z.number().min(0).max(0.25).optional(), velocity: z.number().int().min(0).max(64).optional(), seed: z.number().int().min(0).optional(), dryRun
+}, async input => response(await session.humanizeClipNotes(input)));
+server.tool("duplicate_clip_loop", "Double a Session MIDI clip's loop and copy its notes into the new half, like Live's Duplicate Loop.", { ...clipTarget, dryRun }, async input => response(await session.duplicateClipLoop(input)));
+server.tool("crop_clip", "Crop a Session clip to its loop (or markers), removing everything outside it and moving what is left to start at 0, like Live's Crop Clip. Needs confirm=true.", { ...clipTarget, confirm: z.boolean().default(false), dryRun }, async input => response(await session.cropClip(input)));
 
 server.tool("get_undo_state", "Report whether Live can undo or redo.", {}, async () => response(await session.getUndoState()));
 server.tool("undo", "Undo Live's most recent step. Most Control Deck changes are one undo step (set_time_signature and add_locator are two), and the most recent step may be a change made by hand in Live.", { dryRun }, async ({ dryRun }) => response(await session.undo(dryRun)));
@@ -159,6 +172,14 @@ server.tool("get_view", "Read which main view Live shows (session or arrangement
 server.tool("show_view", "Switch Live between the Session (clip launch) view and the Arrangement view, show the clip editor or device chain or hide the Detail view, and show or hide the Browser. Reads the view back. It changes Live's window, not the set, so it is not an undo step.", {
   view: z.enum(["session", "arrangement"]).optional(), detail: z.enum(["clip", "devices", "hide"]).optional(), browser: z.boolean().optional(), dryRun: z.boolean().default(false)
 }, async input => response(await session.showView(input)));
+server.tool("get_song_settings", "Read song-wide settings: key and scale (Live 12), scale mode, groove amount, the Arrangement loop (on, start, length), punch in and out, Arrangement overdub, Session automation arm, MIDI record quantization, and whether Capture MIDI and Re-Enable Automation are available.", {}, async () => response(await session.getSongSettings()));
+server.tool("set_song_settings", "Set any song-wide settings in one undo step: key (a note name such as F# or Bb, or 0-11), scale (a name from Live's Scale menu, such as Major or Dorian), scaleMode, groovePercent (0-131), the Arrangement loop (enabled, startBeats, lengthBeats), punchIn, punchOut, arrangementOverdub, sessionAutomationRecord, and recordQuantization. Every value is checked first and read back.", {
+  key: z.union([z.string(), z.number().int().min(0).max(11)]).optional(), scale: z.string().min(1).optional(), scaleMode: z.boolean().optional(), groovePercent: z.number().min(0).max(131.25).optional(),
+  loop: z.object({ enabled: z.boolean().optional(), startBeats: z.number().min(0).optional(), lengthBeats: z.number().positive().optional() }).optional(),
+  punchIn: z.boolean().optional(), punchOut: z.boolean().optional(), arrangementOverdub: z.boolean().optional(), sessionAutomationRecord: z.boolean().optional(),
+  recordQuantization: z.enum(RECORD_QUANTIZATIONS).optional(), dryRun: z.boolean().default(false)
+}, async input => response(await session.setSongSettings(input)));
+server.tool("song_action", "Run a song action: capture_midi (Live's Capture MIDI, which turns what you just played into a clip), re_enable_automation (the Re-Enable Automation button), or back_to_arrangement (the Back to Arrangement button).", { action: z.enum(["capture_midi", "re_enable_automation", "back_to_arrangement"]), dryRun: z.boolean().default(false) }, async input => response(await session.songAction(input)));
 const devicePath = z.string().regex(/^\d+(\/\d+\/\d+){0,7}$/, "A device path is a device index, or device/chain/device such as 0/2/1");
 const rackTarget = { trackKind, trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), path: devicePath, expectedRackName: z.string().min(1) };
 server.tool("get_rack", "Read a rack (Instrument, Audio Effect, MIDI Effect, or Drum Rack) at a device path: its chains and their devices with paths, visible macros with values as Live shows them, macro variations, and for a Drum Rack every pad that holds a sound. Path \"0\" is the first device on the track; \"0/2/1\" is device 1 in chain 2 of that rack.", { trackKind, trackIndex: z.number().int().min(0), path: devicePath }, async input => response(await session.getRack(input)));
