@@ -40,6 +40,8 @@ Still unchecked: REX and Complex Pro warp modes, and tracks nested more than one
 - `get_track_routing`, `set_track`, and `duplicate_track` set track color, fold group tracks, set input and output routing by exact name, and duplicate a track.
 - `set_clip`, `set_track`, and `set_scene` return `colorSnapped: true` when Live snaps the requested color to a different palette color.
 - `set_clip` lists any setting Live changed on its own in `alsoChangedByLive`. Turning warping off makes Live turn looping off and move the loop end. It also names the valid choices when a launch mode, quantization, or warp mode is unknown.
+- The local dashboard shows a quiet footer on every page with the version, “Built by Remy Mazmanian”, and a link to remymazmanian.com.
+- The MCP server, the local status service, and the dashboard footer read their version from the root `package.json`. A check fails if the remote script, the macOS wrapper, the dashboard package, or the documented bridge log line disagree with that version.
 
 ### Changed
 

@@ -247,7 +247,7 @@ export default function Home() {
       </section>
 
       <footer>
-        <span>ABLETON CONTROL DECK · 1.0</span>
+        <span>ABLETON CONTROL DECK</span>
         <span>127.0.0.1 · PRIVATE LOOPBACK</span>
       </footer>
     </main>

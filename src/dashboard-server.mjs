@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import http from "node:http";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { buildPluginIndex, readPluginIndex, searchPluginIndex } from "./plugin-index.mjs";
+
+const { version: SERVICE_VERSION } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
 const HOST = "127.0.0.1";
 const PORT = Number(process.env.CONTROL_DECK_DASHBOARD_PORT || 50712);
@@ -115,7 +118,7 @@ async function bridgeSnapshot() {
 async function snapshot() {
   const [bridge, index] = await Promise.all([bridgeSnapshot(), readPluginIndex()]);
   return {
-    service: { state: "online", name: "Control Deck Local Service", version: "1.2.0", localOnly: true, installPath: INSTALL_PATH },
+    service: { state: "online", name: "Control Deck Local Service", version: SERVICE_VERSION, localOnly: true, installPath: INSTALL_PATH },
     bridge,
     library: {
       generatedAt: index.generatedAt,

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -11,6 +12,9 @@ import { PluginTools } from "./plugin-tools.js";
 import { OmnihostClient } from "./omnihost-client.js";
 import { OmnihostTools } from "./omnihost-tools.js";
 import { LAUNCH_MODES, LAUNCH_QUANTIZATIONS, SessionTools, WARP_MODES } from "./session-tools.js";
+import { fromProjectRoot } from "./paths.js";
+
+const { version } = JSON.parse(readFileSync(fromProjectRoot("package.json"), "utf8")) as { version: string };
 
 const ableton = new AbletonClient();
 const commands = new AbletonCommands(ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
@@ -21,7 +25,7 @@ const plugins = new PluginTools(ableton, ableton, undefined, process.env.CONTROL
 const omnihostClient = new OmnihostClient();
 const session = new SessionTools(ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1", async id => String((await samples.getMetadata({ id }) as { path: string }).path));
 const omnihost = new OmnihostTools(omnihostClient, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
-const server = new McpServer({ name: "ableton-control-deck", version: "1.2.0" });
+const server = new McpServer({ name: "ableton-control-deck", version });
 const response = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }], structuredContent: value as Record<string, unknown> });
 
 server.tool("ableton_status", "Check the Control Deck Bridge connection and return Live status.", {}, async () => response(await commands.status()));
