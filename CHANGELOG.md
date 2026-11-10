@@ -4,7 +4,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
-Mixer control and return tracks, Session launching, scenes, clip properties and notes, undo, and track routing. Tested with Ableton Live 12.4.16. After updating, run `npm run setup` and restart Live so it loads the new remote script, which adds `session_ops.py`.
+## [1.3.0] - 2026-11-09
+
+Mixer control and return tracks, Session launching, scenes, clip properties and notes, undo, track routing, sample loading, device on/off and delete, and batched note writes. 107 tools, up from 75. Tested with Ableton Live 12.4.16. After updating, run `npm run setup` and restart Live so it loads the new remote script, which adds `session_ops.py`.
 
 In Live 12.4.16 these all passed:
 - dB volume at -6, -18.5, +6, and -inf, with +12 refused
@@ -49,6 +51,7 @@ Still unchecked: REX and Complex Pro warp modes, and tracks nested more than one
 
 - Large note writes are split into ordered batches that each fit one UDP datagram, so `add_midi_notes`, `add_arrangement_clip_notes`, `modify_arrangement_clip_notes`, and `modify_clip_notes` accept up to 10000 notes (256 for `modify_clip_notes`). macOS refuses a datagram near 9 KB. A request that is still too large fails with `REQUEST_TOO_LARGE`, and a batch that fails partway says how many notes already landed.
 - `add_midi_notes` reads the clip back and fails with `NOTE_VERIFICATION_FAILED`, naming the missing notes, unless every requested note is there. Before, it returned the raw reply without checking it.
+- The bridge's status lists `sample-loading` and `device-control` among its capabilities.
 - Bridge errors for a missing track, scene, device, or parameter now name the index.
 - Dry runs of `set_track_mix` and `set_clip` now report what the real call would refuse: a send or field the track lacks, volume above +6 dB or a send above 0 dB, arming a track that cannot be armed, and audio-only settings on a MIDI clip.
 - `set_track` and `set_clip` put back what they changed when Live refuses a value partway through, such as a routing channel that does not exist for the new routing type.
@@ -107,7 +110,8 @@ First release of Ableton Control Deck, a local MCP bridge that lets an SI agent 
 - Local dashboard at `http://127.0.0.1:50713` showing bridge health, the current Live session, the selected track's devices and a searchable inventory of installed plug-ins. Its Connect page has copy-paste setup guides for Claude Code, Codex, Cursor, VS Code, Gemini CLI, local LLM setups and other MCP clients.
 - Local operation: the Live bridge, status service and dashboard listen on this Mac only, requests to the Live bridge must carry a secret generated for your install, and requests are logged locally to `logs/control-deck.jsonl`.
 
-[Unreleased]: https://github.com/remymazmanian/ableton-control-deck/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/remymazmanian/ableton-control-deck/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/remymazmanian/ableton-control-deck/releases/tag/v1.3.0
 [1.2.0]: https://github.com/remymazmanian/ableton-control-deck/releases/tag/v1.2.0
 [1.1.0]: https://github.com/remymazmanian/ableton-control-deck/releases/tag/v1.1.0
 [1.0.0]: https://github.com/remymazmanian/ableton-control-deck/releases/tag/v1.0.0
