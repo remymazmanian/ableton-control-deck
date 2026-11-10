@@ -22,10 +22,12 @@
     "build:macos": "zsh macos/build-app.sh",
     "build:omnihost": "node max-for-live/build-device.mjs",
     "install:omnihost": "zsh scripts/install-omnihost.sh",
-    "check": "node scripts/check-versions.mjs && tsc -p tsconfig.json --noEmit && node --check scripts/setup.mjs && node --check src/dashboard-server.mjs && node --check src/plugin-index.mjs && node --check scripts/check-versions.mjs",
+    "check": "node scripts/check-versions.mjs && tsc -p tsconfig.json --noEmit && node --check scripts/setup.mjs && node --check src/dashboard-server.mjs && node --check src/plugin-index.mjs && node --check scripts/check-versions.mjs && node --check scripts/uninstall.mjs",
     "test": "vitest run",
     "test:bridge": "python3 -B -m unittest discover -s remote-script/tests -p 'test_*.py'",
-    "test:integration": "ABLETON_INTEGRATION=1 vitest run tests/integration.test.ts"
+    "test:integration": "ABLETON_INTEGRATION=1 vitest run tests/integration.test.ts",
+    "uninstall": "node scripts/uninstall.mjs",
+    "build:pkg": "zsh installer/macos/build-pkg.sh"
   },
   "engines": {
     "node": ">=20"

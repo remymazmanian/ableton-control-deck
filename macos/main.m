@@ -100,7 +100,7 @@ static NSString * const ControlDeckURLString = @"http://127.0.0.1:50713/";
 
 - (void)ensureLocalServices {
     NSString *domain = [NSString stringWithFormat:@"gui/%u", getuid()];
-    for (NSString *label in @[@"com.controldeck.api", @"com.controldeck.dashboard"]) {
+    for (NSString *label in @[@"com.abletondeck.api", @"com.abletondeck.dashboard"]) {
         NSTask *task = [[NSTask alloc] init];
         task.executableURL = [NSURL fileURLWithPath:@"/bin/launchctl"];
         task.arguments = @[@"kickstart", [NSString stringWithFormat:@"%@/%@", domain, label]];

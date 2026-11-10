@@ -2,14 +2,15 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { basename, extname, join, relative, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
-import { isWindows, pluginFolders } from "./platform.mjs";
+import { dataRoot, isWindows, pluginFolders } from "./platform.mjs";
 
 const execFileAsync = promisify(execFile);
 
 export const DEFAULT_PLUGIN_ROOTS = pluginFolders();
 
-export const DEFAULT_PLUGIN_INDEX = new URL("../data/plugin-index.json", import.meta.url);
+export const DEFAULT_PLUGIN_INDEX = pathToFileURL(join(dataRoot(fileURLToPath(new URL("..", import.meta.url))), "data", "plugin-index.json"));
 
 const EXTENSIONS = new Map([
   [".vst", "VST2"],

@@ -10,7 +10,11 @@ const HOST = "127.0.0.1";
 const PORT = Number(process.env.CONTROL_DECK_DASHBOARD_PORT || 50712);
 // Where this checkout lives, so the dashboard's Connect page can render exact
 // copy-paste MCP configuration for this machine.
-const INSTALL_PATH = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
+const INSTALL_PATH = fileURLToPath(new URL("..", import.meta.url)).replace(/[\\/]$/, "");
+// The full path to the MCP server and the command that runs Node: a packaged install names its own
+// launcher (which picks a newer system Node over the bundled one); a checkout uses whatever "node" is.
+const SERVER_ENTRY = fileURLToPath(new URL("../dist/src/index.js", import.meta.url));
+const NODE_COMMAND = process.env.CONTROL_DECK_NODE || "node";
 
 // The bridge client is TypeScript and ships compiled in dist/. The service
 // still starts (and reports "waiting") when the project has not been built or
@@ -140,7 +144,7 @@ const server = http.createServer(async (request, response) => {
   try {
     const url = new URL(request.url || "/", `http://${HOST}:${PORT}`);
     if (request.method === "GET" && url.pathname === "/health") {
-      sendJson(response, 200, { ok: true, service: "Control Deck Local Service", installPath: INSTALL_PATH }, origin);
+      sendJson(response, 200, { ok: true, service: "Control Deck Local Service", installPath: INSTALL_PATH, serverEntry: SERVER_ENTRY, nodeCommand: NODE_COMMAND, node: process.versions.node }, origin);
       return;
     }
     if (request.method === "GET" && url.pathname === "/snapshot") {
