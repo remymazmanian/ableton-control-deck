@@ -36,7 +36,7 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 - List, create, rename, and safely delete tracks
 - Create Session View MIDI clips and write validated note content. Note writes larger than one UDP datagram are split into ordered batches and applied to the same clip.
 - Mixer control: volume in dB, pan, mute, solo, arm, and sends on tracks, return tracks, and the master, read back as Live displays them; create and delete return tracks
-- Read, change, and remove notes in Session clips by note id
+- Read, change, and remove notes in Session clips by note id; quantize, transpose, humanize, duplicate the loop, and crop
 - Load samples from your sample index, or any audio file, into a Session slot, the Arrangement, or Simpler
 - Turn devices on and off, and delete them with confirmation
 - Switch between the Session and Arrangement views, and show or hide the clip editor, device chain, and Browser
