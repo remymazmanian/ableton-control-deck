@@ -10,7 +10,7 @@ from collections import OrderedDict, deque
 import Live
 from _Framework.ControlSurface import ControlSurface
 
-from .bridge_core import BridgeError, filter_plugins, format_from_path, public_plugin, resolve_plugin
+from .bridge_core import BridgeError, filter_plugins, format_from_path, machine_token_path, public_plugin, read_machine_token, resolve_plugin
 from .session_ops import SESSION_COMMANDS, SESSION_QUERIES, SessionOps
 
 
@@ -19,9 +19,9 @@ SCRIPT_VERSION = "1.4.0"
 PROTOCOL = "ableton-control-deck/1"
 HOST = "127.0.0.1"
 PORT = 50711
-# Stamped with the per-install secret when `npm run setup` copies this script
-# into Live's Remote Scripts folder. The placeholder is written split so an
-# unstamped copy can detect itself.
+# Since 1.5 the secret is read from this computer's secret file (see machine_token_path), so this
+# copy can sit in a synced User Library. Installs before 1.5 stamped the secret here instead; that
+# still works as a fallback. The placeholder is written split so an unstamped copy can detect itself.
 TOKEN = "__CONTROL_DECK_TOKEN__"
 MAX_REQUEST_BYTES = 32768
 CHUNK_BYTES = 700
@@ -43,16 +43,26 @@ class ControlDeckBridge(SessionOps, ControlSurface):
         self._plugins_by_path = {}
         self._cache_built_at = None
         self._socket = None
-        if TOKEN == "__CONTROL_DECK" + "_TOKEN__":
+        self._token = self._load_token()
+        if self._token is None:
             self._running = False
-            self.log_message("(%s) refused to start: the auth-token placeholder was never stamped. Run `npm run setup` in the Ableton Control Deck folder, then toggle this Control Surface off and on." % SCRIPT_NAME)
-            self.show_message("Control Deck Bridge has no auth token. Run `npm run setup` and reinstall the remote script.")
+            self.log_message("(%s) refused to start: no bridge secret at %s. Run the Control Deck installer (or `npm run setup`), then toggle this Control Surface off and on." % (SCRIPT_NAME, machine_token_path()))
+            self.show_message("Control Deck Bridge has no bridge secret. Run the Control Deck installer, then reselect the Control Surface.")
             return
         self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self._socket.bind((HOST, PORT))
         self._thread = threading.Thread(target=self._listen, name="ControlDeckBridgeUDP", daemon=True)
         self._thread.start()
         self.log_message("(%s) %s listening on %s:%d" % (SCRIPT_NAME, SCRIPT_VERSION, HOST, PORT))
+
+    def _load_token(self):
+        # This computer's secret file first; a secret stamped into this copy by setup before 1.5 next.
+        token = read_machine_token()
+        if token:
+            return token
+        if TOKEN != "__CONTROL_DECK" + "_TOKEN__":
+            return TOKEN
+        return None
 
     def disconnect(self):
         self._running = False
@@ -102,9 +112,14 @@ class ControlDeckBridge(SessionOps, ControlSurface):
         if not request_id or len(request_id) > 128:
             self._send_error(address, request_id, "INVALID_REQUEST", "A request id of 1-128 characters is required")
             return
-        if request.get("token") != TOKEN:
-            self._send_error(address, request_id, "AUTH_INVALID", "Request token does not match this install's bridge secret. Run `npm run setup` so the remote script and data/bridge-token agree.")
-            return
+        supplied = request.get("token")
+        # A request must carry a secret, and it must match a secret this computer actually has.
+        if not supplied or supplied != getattr(self, "_token", None):
+            # Setup may have made a new secret since Live loaded this script; read it again once.
+            self._token = self._load_token()
+            if not supplied or not self._token or supplied != self._token:
+                self._send_error(address, request_id, "AUTH_INVALID", "Request token does not match this computer's bridge secret. Run the Control Deck installer (or `npm run setup`) again.")
+                return
         cached = self._responses.get(request_id)
         if cached is not None:
             self._send_response(address, cached)
