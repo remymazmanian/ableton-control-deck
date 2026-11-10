@@ -13,7 +13,8 @@ import { OmnihostClient } from "./omnihost-client.js";
 import { OmnihostTools } from "./omnihost-tools.js";
 import { LAUNCH_MODES, LAUNCH_QUANTIZATIONS, WARP_MODES } from "./session-tools.js";
 import { QUANTIZE_GRIDS } from "./note-tools.js";
-import { RECORD_QUANTIZATIONS, SongTools } from "./song-tools.js";
+import { MidiFileTools } from "./midi-tools.js";
+import { RECORD_QUANTIZATIONS } from "./song-tools.js";
 import { MAX_NOTES_PER_CALL } from "./note-chunks.js";
 import { fromProjectRoot } from "./paths.js";
 
@@ -26,7 +27,7 @@ const samples = new SampleIndex();
 const local = new LocalCapabilities();
 const plugins = new PluginTools(ableton, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
 const omnihostClient = new OmnihostClient();
-const session = new SongTools(ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1", async id => String((await samples.getMetadata({ id }) as { path: string }).path));
+const session = new MidiFileTools(ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1", async id => String((await samples.getMetadata({ id }) as { path: string }).path));
 const omnihost = new OmnihostTools(omnihostClient, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
 const server = new McpServer({ name: "ableton-control-deck", version });
 const response = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }], structuredContent: value as Record<string, unknown> });
@@ -146,6 +147,12 @@ server.tool("humanize_clip_notes", "Loosen a Session MIDI clip's notes: shift ea
 }, async input => response(await session.humanizeClipNotes(input)));
 server.tool("duplicate_clip_loop", "Double a Session MIDI clip's loop and copy its notes into the new half, like Live's Duplicate Loop.", { ...clipTarget, dryRun }, async input => response(await session.duplicateClipLoop(input)));
 server.tool("crop_clip", "Crop a Session clip to its loop (or markers), removing everything outside it and moving what is left to start at 0, like Live's Crop Clip. Needs confirm=true.", { ...clipTarget, confirm: z.boolean().default(false), dryRun }, async input => response(await session.cropClip(input)));
+server.tool("export_clip_midi", "Write a Session MIDI clip's notes to a Standard MIDI File (.mid) at an absolute path, with the song's tempo, time signature, and the clip's name. Muted notes are left out. An existing file is only replaced with overwrite=true. The file is read back to check every note.", {
+  trackIndex: z.number().int().min(0), sceneIndex: z.number().int().min(0), path: z.string().min(1), overwrite: z.boolean().default(false)
+}, async input => response(await session.exportClipMidi(input)));
+server.tool("import_midi_file", "Create a Session MIDI clip from a .mid file in an empty slot, by track index and current name. If the file has more than one track with notes, pass midiTrack (the error lists them). The clip is as long as the notes, rounded up to whole bars, unless lengthBeats is given. Every note is read back.", {
+  path: z.string().min(1), trackIndex: z.number().int().min(0), sceneIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), midiTrack: z.number().int().min(0).optional(), clipName: z.string().min(1).max(128).optional(), lengthBeats: z.number().positive().optional(), dryRun: z.boolean().default(false)
+}, async input => response(await session.importMidiFile(input)));
 
 server.tool("get_undo_state", "Report whether Live can undo or redo.", {}, async () => response(await session.getUndoState()));
 server.tool("undo", "Undo Live's most recent step. Most Control Deck changes are one undo step (set_time_signature and add_locator are two), and the most recent step may be a change made by hand in Live.", { dryRun }, async ({ dryRun }) => response(await session.undo(dryRun)));
