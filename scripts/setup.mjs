@@ -228,10 +228,10 @@ function registerWindowsTask(agent) {
     "$ErrorActionPreference = 'Stop'",
     `$name = ${quote(taskName(agent.label))}`,
     "if (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue) { Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue; Unregister-ScheduledTask -TaskName $name -Confirm:$false }",
-    // Stop this service's Node from an earlier install (including one Task Scheduler lost track of) and wait
-    // for it to exit, so the new task does not find the port still taken.
-    `$entry = ${quote(rest[0])}`,
-    "$old = { @(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($entry) }) }",
+    // Stop this service's Node from any copy of Control Deck (an earlier install, a checkout, one Task
+    // Scheduler lost track of) and wait for it to exit, so the new task does not find the port still taken.
+    `$pattern = ${quote(agent.processPattern)}`,
+    "$old = { @(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -and $_.CommandLine -match $pattern }) }",
     "& $old | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
     "for ($i = 0; $i -lt 40 -and (& $old).Count -gt 0; $i++) { Start-Sleep -Milliseconds 250 }",
     "$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME",
@@ -251,12 +251,14 @@ if (!args.has("--skip-agents")) {
   const agents = [
     {
       label: "com.abletondeck.api",
+      processPattern: String.raw`[\\/]src[\\/]dashboard-server\.mjs`,
       available: true,
       programArguments: [nodePath, path.join(root, "src", "dashboard-server.mjs")],
       workingDirectory: root,
     },
     {
       label: "com.abletondeck.dashboard",
+      processPattern: String.raw`[\\/]next[\\/]dist[\\/]bin[\\/]next"? .*50713`,
       available: existsSync(path.join(root, "dashboard", "node_modules", "next")),
       hint: "dashboard is not built yet",
       programArguments: [

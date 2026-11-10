@@ -62,9 +62,11 @@ There is also an optional **sample index** (`src/sample-index.ts`) — a local S
 
 ## Installing
 
-Two equivalent paths; both are safe to re-run at any time.
+**Installers:** on macOS, open `Ableton Control Deck <version>.pkg`. On Windows, run `Ableton-Control-Deck-<version>-Windows-Setup.exe`; it installs for your Windows account only, with no administrator prompt, and works on x64 and Arm64. Both include their own Node.js, set up Live and the background services, and open the connection guide. Running a newer installer updates in place. See [macOS installer](README.md#macos-installer) and [Windows installer](README.md#windows-installer) for where each puts things.
 
-**No coding required:** follow the five-step Quickstart in the [README](README.md#quickstart-no-coding-required) — install Node.js, download and move the folder somewhere permanent, right-click **Install Ableton Control Deck.command** → Open, enable the Control Surface in Live, connect your agent.
+From the source there are two equivalent paths; both are safe to re-run at any time.
+
+**No coding required:** follow the five-step Quickstart in the [README](README.md#quickstart-from-the-source-no-coding-required) — install Node.js, download and move the folder somewhere permanent, right-click **Install Ableton Control Deck.command** → Open, enable the Control Surface in Live, connect your agent.
 
 **Developers:** `npm run setup` runs the same engine: dependency installs, TypeScript + OmniHost + dashboard builds, secret generation, remote-script install, and launchd agents (written and activated). Flags: `--skip-build`, `--skip-remote-script`, `--skip-agents`. Granular scripts remain (`build`, `build:omnihost`, `install:omnihost`, `index:plugins`, `samples:index`, dashboard `dev`/`build`/`check`).
 
@@ -425,6 +427,8 @@ Ports (all loopback-only): `50711/udp` bridge, `50712/tcp` status API, `50713/tc
 ## Uninstalling
 
 **Installed from the .pkg:** open **Uninstall Ableton Control Deck** in `/Applications/Ableton Control Deck`. Choose **Keep Settings** to keep your settings, indexes, and snapshots in `~/Library/Application Support/Ableton Control Deck`, or **Remove Everything**. It asks for an administrator password to remove the program files.
+
+**Installed with the Windows installer:** Settings → Apps → Installed apps → **Ableton Control Deck** → Uninstall. Choose **Keep Settings** to keep your settings, indexes, and snapshots in `%LOCALAPPDATA%\Ableton Control Deck`, or **Remove Everything**. A silent uninstall (`unins000.exe /VERYSILENT` in the program folder) keeps them; add `/REMOVEDATA=yes` to remove them too.
 
 **From a checkout:**
 
