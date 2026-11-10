@@ -12,7 +12,7 @@ import { PluginTools } from "./plugin-tools.js";
 import { OmnihostClient } from "./omnihost-client.js";
 import { OmnihostTools } from "./omnihost-tools.js";
 import { LAUNCH_MODES, LAUNCH_QUANTIZATIONS, WARP_MODES } from "./session-tools.js";
-import { MeterTools } from "./meter-tools.js";
+import { AutomationTools } from "./automation-tools.js";
 import { MAX_NOTES_PER_CALL } from "./note-chunks.js";
 import { fromProjectRoot } from "./paths.js";
 
@@ -25,7 +25,7 @@ const samples = new SampleIndex();
 const local = new LocalCapabilities();
 const plugins = new PluginTools(ableton, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
 const omnihostClient = new OmnihostClient();
-const session = new MeterTools(ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1", async id => String((await samples.getMetadata({ id }) as { path: string }).path));
+const session = new AutomationTools(ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1", async id => String((await samples.getMetadata({ id }) as { path: string }).path));
 const omnihost = new OmnihostTools(omnihostClient, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
 const server = new McpServer({ name: "ableton-control-deck", version });
 const response = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }], structuredContent: value as Record<string, unknown> });
@@ -176,6 +176,23 @@ server.tool("rack_variation", "Store the rack's current macros as a new variatio
 }, async input => response(await session.rackVariation(input)));
 server.tool("get_meters", "Read every track's, return track's, and the master's output meter right now, in dB (left, right, and peak). Live's meters move in steps of about 1.5 dB, and read silence while Live is stopped.", {}, async () => response(await session.getMeters()));
 server.tool("mix_check", "Sample the output meters while Live plays (default 4 seconds) and report peak and average level per track, then flag problems: anything over 0 dBFS, a master with under 1 dB of headroom, a track playing a clip but making no sound, a track leaning hard left or right, and a track 24 dB or more below the loudest. Start playback first.", { seconds: z.number().min(1).max(30).default(4) }, async input => response(await session.mixCheck(input)));
+const automationParameter = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("mixer"), field: z.enum(["volume", "panning", "send"]), sendIndex: z.number().int().min(0).optional() }),
+  z.object({ kind: z.literal("device"), path: devicePath, parameterIndex: z.number().int().min(0), name: z.string().min(1) })
+]);
+server.tool("get_clip_automation", "Read a Session clip's automation. With no parameter, list every mixer and device parameter on the clip's track that the clip automates. With a parameter, sample its envelope evenly across the clip (default 33 samples).", {
+  trackIndex: z.number().int().min(0), sceneIndex: z.number().int().min(0), parameter: automationParameter.optional(), samples: z.number().int().min(2).max(512).optional()
+}, async input => response(await session.getClipAutomation(input)));
+server.tool("write_clip_automation", "Draw automation inside a Session clip for a parameter on its own track: volume, pan, or a send, or any device parameter by path (including inside racks) and current name. Points are beats from the clip start. shape \"steps\" holds each value until the next point; \"ramp\" moves smoothly between points in steps of resolution beats (default 1/8). Volume and send points may be given in db (steps only). clearFirst replaces the parameter's existing envelope. Every value is checked first and read back.", {
+  trackIndex: z.number().int().min(0), sceneIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), expectedClipName: z.string(),
+  parameter: automationParameter,
+  points: z.array(z.object({ time: z.number().min(0), value: z.number().optional(), db: z.union([z.number().min(-200).max(6), z.literal("-inf")]).optional() })).min(1).max(512),
+  shape: z.enum(["steps", "ramp"]).default("steps"), resolution: z.number().min(1 / 64).max(4).optional(), clearFirst: z.boolean().default(false), dryRun: z.boolean().default(false)
+}, async input => response(await session.writeClipAutomation(input)));
+server.tool("clear_clip_automation", "Clear a Session clip's envelope for one parameter, or every envelope in the clip with all=true and confirm=true.", {
+  trackIndex: z.number().int().min(0), sceneIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), expectedClipName: z.string(),
+  parameter: automationParameter.optional(), all: z.boolean().default(false), confirm: z.boolean().default(false), dryRun: z.boolean().default(false)
+}, async input => response(await session.clearClipAutomation(input)));
 
 server.tool("omnihost_status", "Check whether Control Deck OmniHost is loaded and return its full VST3 parameter-index status.", {}, async () => response(await omnihost.status()));
 server.tool("list_omnihost_parameters", "Search Mini V4 parameters indexed by Control Deck OmniHost, excluding MIDI CC helper entries by default.", {

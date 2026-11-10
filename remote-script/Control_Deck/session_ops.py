@@ -7,6 +7,7 @@ allowlist, and every mutation checks the target's current name first.
 import re
 
 from .bridge_core import BridgeError
+from .automation_ops import AUTOMATION_COMMANDS, AUTOMATION_QUERIES, AutomationOps
 from .rack_ops import RACK_COMMANDS, RACK_QUERIES, RackOps
 
 
@@ -43,7 +44,7 @@ SESSION_QUERIES = (
     "/live/devices/get/state",
     "/live/view/get/selection",
     "/live/meters/get",
-) + RACK_QUERIES
+) + RACK_QUERIES + AUTOMATION_QUERIES
 SESSION_COMMANDS = (
     "/live/mixer/set",
     "/live/clip_slot/fire",
@@ -71,7 +72,7 @@ SESSION_COMMANDS = (
     "/live/device/set_enabled",
     "/live/device/delete",
     "/live/view/select",
-) + RACK_COMMANDS
+) + RACK_COMMANDS + AUTOMATION_COMMANDS
 # Undo and redo move through Live's history, so they must not open a step of their own.
 # Same limit as Control_Deck.MAX_ARRANGEMENT_BEATS (importing it here would be circular).
 MAX_ARRANGEMENT_BEATS = 1576800.0
@@ -80,7 +81,7 @@ SAMPLE_EXTENSIONS = (".wav", ".aif", ".aiff", ".mp3", ".flac")
 NO_UNDO_STEP = ("/live/song/undo", "/live/song/redo", "/live/view/select")
 
 
-class SessionOps(RackOps):
+class SessionOps(RackOps, AutomationOps):
     # ------------------------------------------------------------------ dispatch
 
     def _session_query(self, address, args):
@@ -115,6 +116,8 @@ class SessionOps(RackOps):
             return self._meters()
         if address in RACK_QUERIES:
             return self._rack_query(address, args)
+        if address in AUTOMATION_QUERIES:
+            return self._automation_query(address, args)
         raise BridgeError("ADDRESS_NOT_ALLOWED", "Unsupported Live query: %s" % address)
 
     def _session_command(self, address, args):
@@ -148,6 +151,8 @@ class SessionOps(RackOps):
         }
         if address in RACK_COMMANDS:
             return self._rack_command(address, args)
+        if address in AUTOMATION_COMMANDS:
+            return self._automation_command(address, args)
         handler = handlers.get(address)
         if handler is None:
             raise BridgeError("ADDRESS_NOT_ALLOWED", "Unsupported Live mutation: %s" % address)

@@ -160,6 +160,16 @@ Return tracks:
 - **create_return_track** — Add a return track at the end, optionally named. Every track gets a send to it at −inf dB. Live allows 12. Live adds the return's letter to its name, so `Plate` reads back as `C-Plate`; use that full name with the other tools.
 - **delete_return_track** — Delete a return track by index and current name (with its letter, such as `C-Plate`); needs `confirm: true`. Every track loses its send to it, and the returns after it move up a letter.
 
+### Clip automation
+
+Automation inside a Session clip, for a parameter on the clip's own track: its volume, pan, or a send, or any device parameter, including inside racks by path. A parameter is named as `{"kind": "mixer", "field": "volume"}` (or `"panning"`, or `"send"` with `sendIndex`) or `{"kind": "device", "path": "0/2/1", "parameterIndex": 3, "name": "Cutoff"}`, with the parameter's current name. Times are beats from the clip start.
+
+- **write_clip_automation** — Draw points as `steps` (each value holds until the next point, the last until the clip end) or as a `ramp` (a straight line between points, built from short steps of `resolution` beats, 1/8 by default). Volume and send points can be given in `db` (steps only). `clearFirst` replaces the parameter's existing envelope. Every value and time is checked before anything is written, a long ramp is split into commands that fit one datagram, and every step is read back.
+- **get_clip_automation** — With no parameter, list every mixer and device parameter on the track that the clip automates. With one, sample its envelope evenly across the clip.
+- **clear_clip_automation** — Clear one parameter's envelope, or all of them with `all: true` and `confirm: true`.
+
+Live has no API to list an envelope's breakpoints, so reads sample its value over time. At an exact step boundary Live reports the earlier step's value, so each sample is taken just after its time.
+
 ### Meters and mix check
 
 Live's output meters read 0 to 1 on a scale that is linear in dB. Control Deck converts them using a calibration made in Live 12.4.16 with test tones at 0, −6, −12, −18, −24, and −36 dBFS: 0 dBFS reads 0.921, each dB is 0.0132, so the top of the meter is about +6 dB and the bottom about −70 dB. The meter moves in steps of about 1.5 dB, so levels are that precise and no more. Meters read silence while Live is stopped.
@@ -440,7 +450,7 @@ Then delete the install folder, remove the wrapper app from `/Applications` if y
 - **No proprietary plug-in UI control.** Control Deck can instantiate plug-ins and set the parameters they expose; it cannot manipulate vendor UIs or parameters kept hidden from Live (OmniHost exists to widen that surface for one hosted instrument).
 - **Native device loading covers devices, not factory preset browsers.** `load_live_device` resolves items under Instruments, Audio Effects, MIDI Effects, and Drums by exact name and refuses fuzzy matches. A saved User Library rack is a separate tool, `load_user_library_item`.
 - **Arrangement MIDI clips can be created on Live 12.1.10 and newer.** `create_arrangement_midi_clip` calls `Track.create_midi_clip(start_time, length)` and reads the clip back. Older Live versions fail by name. Session clips can still be copied into the Arrangement with `place_clip_in_arrangement`.
-- **Arrangement automation, saving the Live Set, and rendering are not available** through the API. Control Deck does not fake them with UI automation.
+- **Arrangement track automation, saving the Live Set, and rendering are not available** through the API. Automation inside Session clips is available with `write_clip_automation`. Control Deck does not fake them with UI automation.
 - **Preset files on disk are not loaded.** `.vstpreset`, `.aupreset`, `.fxp`, and `.fxb` paths are refused. Use a User Library `.adg` or `.adv`, selected by exact name.
 - **No audio preview.** The API does not preview samples, and Control Deck does not automate the UI to do it.
 - **Live API coupling.** The bridge uses Live's Python remote-script API, so a future Live update could require a compatible Control Deck release.
