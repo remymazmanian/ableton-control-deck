@@ -4,12 +4,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+In Live 12.4.16 the writing tools passed: `i VI III VII` in the song's A minor (A, F, C, G with bass), `I V vi IV` as a C major arpeggio, two bars of boom-bap on Strutter Kit's own kick, snare, and closed-hat pads with 30% swing, both playing (the mix check measured them), and refusal of an occupied slot and a bad numeral.
+
+In Live 12.4.16 MIDI files passed: a 300-note clip exported, refused a second export to the same file without `overwrite`, imported into another slot in two batches with every pitch and velocity identical and every time within 0.0005 beats, and refused import into an occupied slot.
+
+In Live 12.4.16 song settings passed: F# Dorian (and Bb read as A#), 50% groove, a 32-beat loop at beat 16, punch, overdub, and 1/16 record quantization, refusal of an unknown scale, a bad key, and Capture MIDI with nothing played, and every setting restored afterwards.
+
+In Live 12.4.16 the note tools passed: quantizing one pitch at 50% (C3 from 2.62 to 2.56 on a 1/16 grid), quantizing every note to 1/16, transposing a pitch range up an octave, refusing a transpose past 127, humanizing with a seed, duplicating the loop (4 notes to 8), and cropping to the second half of an 8-beat clip (notes moved to start at 0, loop and markers at 0 to 4). Live's own `Clip.crop()` left that MIDI clip unchanged, so the bridge crops MIDI clips itself.
+
 In Live 12.4.16 view switching passed: to the Arrangement, the clip editor, the device chain with the Browser, back to Session with the Detail view hidden, refusal of an empty request, no undo step added, and the window restored afterwards.
 
 Also in Live 12.4.16, clip automation passed on a Drift track: a volume ramp from silence to full (65 steps, all read back), A-Reverb send steps at −inf, −12, and −6 dB, an LP Freq ramp up and back down (97 steps), listing the three automated parameters, clearing one envelope and then all of them, and refusal of an out-of-range value, a point past the clip end, a stale parameter name, and clearing all without confirmation.
 
 ### Added
 
+- `write_chord_progression` writes Roman-numeral progressions, voice-led, in the song's key by default, with sustain, stab, offbeat, or arpeggio rhythms and an optional bass. `write_drum_pattern` writes five styles with swing and accents, mapped to a Drum Rack's pads by name.
+- `export_clip_midi` and `import_midi_file` write a Session clip to a Standard MIDI File and create a clip from one, with every note checked.
+- `get_song_settings`, `set_song_settings`, and `song_action`: the song's key and scale, groove, Arrangement loop, punch in and out, overdub, automation arm, and record quantization, plus Capture MIDI, Re-Enable Automation, and Back to Arrangement.
+- Note tools for Session clips: `quantize_clip` (Live's own Quantize, optionally one pitch), `transpose_clip_notes`, `humanize_clip_notes` (seeded, so it can be repeated), `duplicate_clip_loop`, and `crop_clip` (needs `confirm: true`).
 - `get_view` and `show_view` read and switch Live's main view (Session or Arrangement), show the clip editor or device chain or hide the Detail view, and show or hide the Browser. Switching is not an undo step.
 - `write_clip_automation`, `get_clip_automation`, and `clear_clip_automation` draw, read, and clear automation inside a Session clip for its track's volume, pan, or sends, or any device parameter by path. Points become steps or ramps, volume and sends take dB, long ramps are split into commands that fit one datagram, and every step is read back.
 
