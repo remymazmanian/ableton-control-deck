@@ -4,6 +4,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-09
+
+Selection, racks and drum pads, and level meters with a mix check. 118 tools, up from 107. After updating, run `npm run setup` and restart Live.
+
 Meters were calibrated in Live 12.4.16 with 1 kHz tones at 0, −6, −12, −18, −24, and −36 dBFS. A mix check on a planted mix flagged all four problems: a 0 dBFS tone with its fader at +4 dB peaking at +4.0 dB, a MIDI track with no instrument playing a clip, a −24 dBFS tone panned hard left (reading −21 dB, from the +3 dB pan law), and the same track sitting 25 dB below the loudest. It also refused to run while Live was stopped.
 
 In Live 12.4.16 these passed, on Strutter Kit (a Drum Rack inside an Instrument Rack) and Drum Buss Grand: muting and soloing pads in the nested Drum Rack; renaming and muting a chain; an outer macro; a parameter on a device three racks deep (path `0/0/0/0/0`); recalling, storing, deleting, and randomizing variations; refusal of a stale pad name and a non-rack path; and every rack read back exactly as it started. Also: selecting a return track, the master, and a track with a scene; refusal of a stale track name and a missing scene; `get_live_set` with a return track selected; and no undo step added by selecting.
@@ -130,7 +134,8 @@ First release of Ableton Control Deck, a local MCP bridge that lets an SI agent 
 - Local dashboard at `http://127.0.0.1:50713` showing bridge health, the current Live session, the selected track's devices and a searchable inventory of installed plug-ins. Its Connect page has copy-paste setup guides for Claude Code, Codex, Cursor, VS Code, Gemini CLI, local LLM setups and other MCP clients.
 - Local operation: the Live bridge, status service and dashboard listen on this Mac only, requests to the Live bridge must carry a secret generated for your install, and requests are logged locally to `logs/control-deck.jsonl`.
 
-[Unreleased]: https://github.com/remymazmanian/ableton-control-deck/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/remymazmanian/ableton-control-deck/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/remymazmanian/ableton-control-deck/releases/tag/v1.4.0
 [1.3.0]: https://github.com/remymazmanian/ableton-control-deck/releases/tag/v1.3.0
 [1.2.0]: https://github.com/remymazmanian/ableton-control-deck/releases/tag/v1.2.0
 [1.1.0]: https://github.com/remymazmanian/ableton-control-deck/releases/tag/v1.1.0
