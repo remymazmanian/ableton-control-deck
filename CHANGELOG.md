@@ -4,6 +4,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+In Live 12.4.16 the Arrangement builder passed: Intro, Drop, and Outro built at bar 101 from scenes found by name and index, the Drop's 12 beats filled with one whole 8-beat drum copy and a 4-beat tail, the keys sitting out the Drop and returning shortened to 4 beats for the Outro, three named locators, and refusal to build over the clips just placed.
+
 In Live 12.4.16 snapshots passed: a snapshot of 6 tracks with 5 devices, no changes reported right after, then a diff listing exactly the six changes made (volume, Drift turned off, its LP Freq, a clip's notes and looping, and a new clip), and refusal of a name in use and a missing snapshot.
 
 In Live 12.4.16 the writing tools passed: `i VI III VII` in the song's A minor (A, F, C, G with bass), `I V vi IV` as a C major arpeggio, two bars of boom-bap on Strutter Kit's own kick, snare, and closed-hat pads with 30% swing, both playing (the mix check measured them), and refusal of an occupied slot and a bad numeral.
@@ -20,6 +22,7 @@ Also in Live 12.4.16, clip automation passed on a Drift track: a volume ramp fro
 
 ### Added
 
+- `build_arrangement` lays out sections (a scene and a length in bars) end to end, with every track's clips ending exactly on each section boundary and a named locator per section, and refuses to build over existing Arrangement clips.
 - `snapshot_set`, `list_snapshots`, and `diff_snapshot` save the set's state and list every change since in plain words: mix, routing, devices and their parameters, clips, notes, scenes, and song settings.
 - `write_chord_progression` writes Roman-numeral progressions, voice-led, in the song's key by default, with sustain, stab, offbeat, or arpeggio rhythms and an optional bass. `write_drum_pattern` writes five styles with swing and accents, mapped to a Drum Rack's pads by name.
 - `export_clip_midi` and `import_midi_file` write a Session clip to a Standard MIDI File and create a clip from one, with every note checked.

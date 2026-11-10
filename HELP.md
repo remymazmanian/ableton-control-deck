@@ -178,6 +178,10 @@ Automation inside a Session clip, for a parameter on the clip's own track: its v
 
 Live has no API to list an envelope's breakpoints, so reads sample its value over time. At an exact step boundary Live reports the earlier step's value, so each sample is taken just after its time.
 
+### Building an Arrangement
+
+- **build_arrangement** — Lay out sections end to end from `startBar` (default 1). Each section is a `name`, a `scene` (its index or exact name), and a length in `bars`. Every track with a clip in that scene gets copies of the clip that end exactly on the section's last beat: whole copies, then for a MIDI clip a shorter copy holding the notes that fit. An audio clip only gets whole copies, so if it does not divide the section the rest stays empty and the result lists it under `gaps`. A locator named after each section is added at its start unless `locators: false`; that needs playback stopped, because Live adds locators at the playhead. Before anything changes, the build is refused if any of those tracks already has Arrangement clips in the range. `dryRun` returns the plan. Each section on each track is its own undo step.
+
 ### Snapshots
 
 - **snapshot_set** — Save the set's state under a name: tempo, time signature, song settings, scenes, every track's mix and routing, every top-level device's on/off state and parameter values, and every Session clip's settings with a fingerprint of its notes. Snapshots are kept in the project's `data/snapshots` folder (not committed). A name in use needs `overwrite: true`. Reading every parameter takes a few seconds on a set with large plug-ins.

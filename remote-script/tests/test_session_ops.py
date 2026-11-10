@@ -91,6 +91,7 @@ class NoteClip(SessionClip):
         self.last_vector = None
         self.last_applied = None
 
+    add_new_notes = ArrangementClip.add_new_notes
     get_notes_extended = ArrangementClip.get_notes_extended
     apply_note_modifications = ArrangementClip.apply_note_modifications
     remove_notes_extended = ArrangementClip.remove_notes_extended
@@ -678,6 +679,47 @@ class SessionOpsTests(unittest.TestCase):
         self.assertEqual(self.song.undo_log, ["begin", "end"])
         self.song.tracks[1].clip_slots[0].clip = make_audio_clip()
         self.assertIn("needs a MIDI clip", self.refused("/live/clip/duplicate_loop", 1, 0, "Vox", "Take"))
+
+    # ---------------------------------------------------------------- arrangement sections
+
+    def arrangement_track(self, track):
+        placed = []
+
+        def duplicate(clip, position):
+            placed.append(types.SimpleNamespace(name=clip.name, start_time=position, end_time=position + clip.length))
+            track.arrangement_clips.append(placed[-1])
+
+        def create(position, length):
+            tail = NoteClip("", [])
+            tail.start_time, tail.end_time = position, position + length
+            track.arrangement_clips.append(tail)
+            return tail
+
+        track.duplicate_clip_to_arrangement = duplicate
+        track.create_midi_clip = create
+        return placed
+
+    def test_places_a_section_ending_exactly_on_its_last_beat(self):
+        track = self.song.tracks[0]
+        clip = NoteClip("Beat", [(36, 0.0), (38, 1.0), (42, 3.0)])
+        track.clip_slots[0].clip = clip
+        self.arrangement_track(track)
+        # 10 beats of a 4-beat clip: two whole copies, then a 2-beat clip with the notes that fit.
+        self.command("/live/arrangement/place_section", 0, 0, 16.0, 26.0)
+        spans = [(clip.start_time, clip.end_time) for clip in track.arrangement_clips]
+        self.assertEqual(spans, [(16.0, 20.0), (20.0, 24.0), (24.0, 26.0)])
+        tail = track.arrangement_clips[-1]
+        self.assertEqual((tail.name, sorted(note.pitch for note in tail._notes)), ("Beat", [36, 38]))
+        self.assertIn("already has clip", self.refused("/live/arrangement/place_section", 0, 0, 24.0, 28.0))
+
+    def test_audio_sections_only_get_whole_copies(self):
+        track = self.song.tracks[1]
+        audio = SessionClip("Take", midi=False)
+        object.__setattr__(audio, "length", 4.0)
+        track.clip_slots[0].clip = audio
+        self.arrangement_track(track)
+        self.command("/live/arrangement/place_section", 1, 0, 0.0, 10.0)
+        self.assertEqual([(clip.start_time, clip.end_time) for clip in track.arrangement_clips], [(0.0, 4.0), (4.0, 8.0)])
 
     def test_lists_routing_options(self):
         values = self.query("/live/track/get/routing_options", "track", 0)
