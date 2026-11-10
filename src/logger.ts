@@ -1,10 +1,10 @@
 import { mkdir, appendFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { fromProjectRoot } from "./paths.js";
+import { fromDataRoot } from "./paths.js";
 import { isExternalDrive } from "./external-drive.js";
 
 export class JsonLogger {
-  constructor(private readonly path = process.env.CONTROL_DECK_LOG ?? fromProjectRoot("logs/control-deck.jsonl")) {}
+  constructor(private readonly path = process.env.CONTROL_DECK_LOG ?? fromDataRoot("logs/control-deck.jsonl")) {}
 
   async write(record: Record<string, unknown>): Promise<void> {
     const safe = JSON.parse(JSON.stringify(record, (_key, value) =>

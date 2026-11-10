@@ -18,25 +18,33 @@ import { copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises"
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { inTemporaryFolder, isWindows, machineTokenPath, remoteScriptsPath } from "../src/platform.mjs";
+import { dataRoot, inTemporaryFolder, isWindows, machineTokenPath, remoteScriptsPath, userLibraryPath } from "../src/platform.mjs";
 
 const root = path.dirname(fileURLToPath(new URL("../package.json", import.meta.url)));
 const args = new Set(process.argv.slice(2));
 const home = homedir();
-const skipBuild = args.has("--skip-build");
+// The .pkg and Windows installers ship a built, read-only copy marked by packaged.json; its settings,
+// indexes, and logs live in the per-machine data folder instead.
+const packaged = existsSync(path.join(root, "packaged.json"));
+const dataDirectory = dataRoot(root);
+const skipBuild = packaged || args.has("--skip-build");
 
 // Before 1.5 the secret lived in data/bridge-token and was written into the remote script. It now
 // lives in a per-machine file outside any synced folder; an existing secret is moved there unchanged.
 const legacyTokenFile = path.join(root, "data", "bridge-token");
 const tokenFile = machineTokenPath();
-const installPathFile = path.join(root, "data", "install-path");
+const installPathFile = path.join(dataDirectory, "data", "install-path");
 const remoteScriptSource = path.join(root, "remote-script", "Control_Deck");
 const remoteScriptTarget = remoteScriptsPath();
 const remoteScriptTargetDirectory = remoteScriptTarget.path;
-const sampleLibraryConfig = path.join(root, "config", "sample-library.json");
+const sampleLibraryConfig = path.join(dataDirectory, "config", "sample-library.json");
 const sampleLibraryExample = path.join(root, "config", "sample-library.example.json");
 const agentsDirectory = path.join(home, "Library", "LaunchAgents");
-const nodePath = process.execPath;
+// The installers run setup through their Node launcher, which picks the newer of the bundled and
+// system Node each time a service starts; services are pinned to that launcher, not to one Node.
+const nodePath = process.env.CONTROL_DECK_NODE || process.execPath;
+const omnihostSource = path.join(root, "max-for-live", "build");
+const omnihostTarget = path.join(userLibraryPath().path, "Presets", "Instruments", "Max Instrument", "Control Deck");
 
 let failures = 0;
 
@@ -63,7 +71,7 @@ console.log(`  Install location: ${root}`);
 
 // ---------------------------------------------------------------- guardrails
 const temporaryFolder = inTemporaryFolder(root);
-if (temporaryFolder && !args.has("--allow-any-location")) {
+if (temporaryFolder && !packaged && !args.has("--allow-any-location")) {
   console.log(`
   This folder is in your ${temporaryFolder} folder. Setup pins services to the
   folder's location, so please move it somewhere permanent first — your home
@@ -145,8 +153,9 @@ if (existsSync(tokenFile)) {
 
 // ------------------------------------------------------------ sample config
 if (!existsSync(sampleLibraryConfig) && existsSync(sampleLibraryExample)) {
+  await mkdir(path.dirname(sampleLibraryConfig), { recursive: true });
   await copyFile(sampleLibraryExample, sampleLibraryConfig);
-  ok("Created config/sample-library.json (edit it to point at your sample drive before indexing)");
+  ok(`Created ${packaged ? sampleLibraryConfig : "config/sample-library.json"} (edit it to point at your sample drive before indexing)`);
 } else if (existsSync(sampleLibraryConfig)) {
   ok("Sample library config already present");
 }
@@ -163,6 +172,13 @@ if (!args.has("--skip-remote-script")) {
     await copyFile(path.join(remoteScriptSource, file), path.join(remoteScriptTargetDirectory, file));
   }
   ok(`Installed to ${remoteScriptTargetDirectory} (found from ${remoteScriptTarget.source})`);
+
+  const omnihostFiles = ["Control Deck OmniHost.amxd", "omnihost-controller.js"];
+  if (omnihostFiles.every(file => existsSync(path.join(omnihostSource, file)))) {
+    await mkdir(omnihostTarget, { recursive: true });
+    for (const file of omnihostFiles) await copyFile(path.join(omnihostSource, file), path.join(omnihostTarget, file));
+    ok(`OmniHost device installed to ${omnihostTarget}`);
+  }
 }
 
 // ------------------------------------------------------------ launch agents

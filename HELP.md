@@ -424,25 +424,17 @@ Ports (all loopback-only): `50711/udp` bridge, `50712/tcp` status API, `50713/tc
 
 ## Uninstalling
 
+**Installed from the .pkg:** open **Uninstall Ableton Control Deck** in `/Applications/Ableton Control Deck`. Choose **Keep Settings** to keep your settings, indexes, and snapshots in `~/Library/Application Support/Ableton Control Deck`, or **Remove Everything**. It asks for an administrator password to remove the program files.
+
+**From a checkout:**
+
 ```sh
-launchctl bootout gui/$(id -u)/com.abletondeck.api
-launchctl bootout gui/$(id -u)/com.abletondeck.dashboard
-rm ~/Library/LaunchAgents/com.abletondeck.*.plist
-rm -rf ~/Music/Ableton/"User Library"/"Remote Scripts"/Control_Deck
-rm -rf ~/Music/Ableton/"User Library"/Presets/Instruments/"Max Instrument"/"Control Deck"
-rm -rf ~/Library/"Application Support"/"Ableton Control Deck"
+npm run uninstall
 ```
 
-On Windows, in PowerShell:
+It stops the background services, removes the remote script and OmniHost device from Live's User Library and this computer's bridge secret, and asks whether to keep settings and snapshots. Then delete the folder.
 
-```powershell
-Unregister-ScheduledTask -TaskName 'Ableton Control Deck*' -Confirm:$false
-Remove-Item -Recurse "$env:LOCALAPPDATA\Ableton Control Deck"
-```
-
-Then delete `Remote Scripts\Control_Deck` from your User Library.
-
-Then delete the install folder, remove the wrapper app from `/Applications` if you copied it there, and remove the server from your agent (for Claude Code: `claude mcp remove ableton`). Control Deck writes nowhere else.
+Either way, remove the server from your agent too (for Claude Code: `claude mcp remove ableton`).
 
 ## Security model
 
