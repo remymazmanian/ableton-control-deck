@@ -34,9 +34,11 @@ export class PluginTools {
   async loadPlugin(input: { trackKind?: TrackKind; trackIndex: number; expectedTrackName: string; name: string; format: PluginFormat; expectedPath?: string; dryRun?: boolean }): Promise<ToolResult> {
     const started = performance.now();
     if (!Number.isInteger(input.trackIndex) || input.trackIndex < 0) throw new Error("Track index must be a non-negative integer.");
+    if (input.format === "vst2") throw new Error("Control Deck does not load VST2 plugins; use the VST3 or AU version.");
     const kind = input.trackKind ?? "track";
     const trackName = await this.requireTrackName(kind, input.trackIndex, input.expectedTrackName);
     const resolved = await this.resolve(input.name, input.format, input.expectedPath);
+    if (resolved.format === "vst2") throw new Error(`'${resolved.name}' is a VST2 plugin. Control Deck does not load VST2 plugins; use the VST3 or AU version.`);
     if (input.expectedPath && normalizePath(resolved.path) !== normalizePath(input.expectedPath)) throw new Error(`Plugin path safeguard failed: expected '${input.expectedPath}', resolved '${resolved.path}'.`);
     const bridgeRequest = { trackKind: kind, trackIndex: input.trackIndex, expectedTrackName: trackName, name: resolved.name, format: resolved.format, path: resolved.path };
     if (input.dryRun || this.defaultDryRun) {

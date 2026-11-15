@@ -101,6 +101,15 @@ describe("plugin tools", () => {
     expect(bridge.loadBrowserDevice).toHaveBeenCalledWith(expect.objectContaining({ trackKind: "return", trackIndex: 0, expectedTrackName: "A-Reverb" }));
   });
 
+  it("refuses VST2 plugins, asked for or resolved", async () => {
+    const bridge = { resolvePlugin: vi.fn().mockResolvedValue({ plugin: { name: "Old Synth", path: "Plugins/VST/Old Synth", format: "vst2" } }), loadPlugin: vi.fn() };
+    const osc = { query: vi.fn().mockResolvedValue(state("Synth")) };
+    const tools = new PluginTools(bridge as never, osc as never, logger as never);
+    await expect(tools.loadPlugin({ trackIndex: 0, expectedTrackName: "Synth", name: "Old Synth", format: "vst2" })).rejects.toThrow(/does not load VST2/);
+    await expect(tools.loadPlugin({ trackIndex: 0, expectedTrackName: "Synth", name: "Old Synth", format: "vst3" })).rejects.toThrow(/is a VST2 plugin/);
+    expect(bridge.loadPlugin).not.toHaveBeenCalled();
+  });
+
   it("rejects a shifted or renamed target before calling Control Deck", async () => {
     const bridge = { resolvePlugin: vi.fn(), loadPlugin: vi.fn() };
     const osc = { query: vi.fn().mockResolvedValue(state("Wrong Track")) };

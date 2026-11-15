@@ -24,6 +24,7 @@ Also in Live 12.4.16, clip automation passed on a Drift track: a volume ramp fro
 
 ### Fixed
 
+- `load_plugin` and `load_plugin_on_track` refuse VST2 plugins, on both the server and Live's side; load the VST3 or AU version instead.
 - `ableton_status` reports whether Live is playing or recording, with a warning while it records. While Live records, every change to the set and every device load is refused with LIVE_IS_RECORDING; playing, stopping, and switching recording and the metronome still work. Tested in Live 12.4.16: a tempo change and a device load were refused during Arrangement recording, and stopping it went through.
 - `load_plugin`, `load_plugin_on_track`, `load_live_device`, and `load_user_library_item` can load onto a return track or the master: pass `trackKind` "return" or "master", as the mixer and device tools already take.
 
