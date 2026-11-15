@@ -6,9 +6,12 @@ allowlist, and every mutation checks the target's current name first.
 
 import re
 
+import Live
+
 from .bridge_core import BridgeError
 from .automation_ops import AUTOMATION_COMMANDS, AUTOMATION_QUERIES, AutomationOps
 from .rack_ops import RACK_COMMANDS, RACK_QUERIES, RackOps
+from .song_ops import SONG_COMMANDS, SONG_QUERIES, SongOps
 
 
 MAX_NAME = 128
@@ -45,7 +48,7 @@ SESSION_QUERIES = (
     "/live/view/get/selection",
     "/live/meters/get",
     "/live/app_view/get",
-) + RACK_QUERIES + AUTOMATION_QUERIES
+) + RACK_QUERIES + AUTOMATION_QUERIES + SONG_QUERIES
 SESSION_COMMANDS = (
     "/live/mixer/set",
     "/live/clip_slot/fire",
@@ -74,19 +77,25 @@ SESSION_COMMANDS = (
     "/live/device/delete",
     "/live/view/select",
     "/live/app_view/show",
-) + RACK_COMMANDS + AUTOMATION_COMMANDS
+    "/live/clip/quantize",
+    "/live/clip/duplicate_loop",
+    "/live/clip/crop",
+    "/live/arrangement/place_section",
+) + RACK_COMMANDS + AUTOMATION_COMMANDS + SONG_COMMANDS
 # Undo and redo move through Live's history, so they must not open a step of their own.
 # Same limit as Control_Deck.MAX_ARRANGEMENT_BEATS (importing it here would be circular).
 MAX_ARRANGEMENT_BEATS = 1576800.0
 SAMPLE_EXTENSIONS = (".wav", ".aif", ".aiff", ".mp3", ".flac")
 # Selecting changes Live's view, not the set, so it is not an undoable step either.
 NO_UNDO_STEP = ("/live/song/undo", "/live/song/redo", "/live/view/select", "/live/app_view/show")
+# Live's RecordQuantization grid values for Clip.quantize.
+QUANTIZE_GRIDS = {"1/4": 1, "1/8": 2, "1/8T": 3, "1/8+1/8T": 4, "1/16": 5, "1/16T": 6, "1/16+1/16T": 7, "1/32": 8}
 # Live's application view names.
 MAIN_VIEWS = {"session": "Session", "arrangement": "Arranger"}
 DETAIL_VIEWS = {"clip": "Detail/Clip", "devices": "Detail/DeviceChain"}
 
 
-class SessionOps(RackOps, AutomationOps):
+class SessionOps(RackOps, AutomationOps, SongOps):
     # ------------------------------------------------------------------ dispatch
 
     def _session_query(self, address, args):
@@ -125,6 +134,8 @@ class SessionOps(RackOps, AutomationOps):
             return self._rack_query(address, args)
         if address in AUTOMATION_QUERIES:
             return self._automation_query(address, args)
+        if address in SONG_QUERIES:
+            return self._song_query(address, args)
         raise BridgeError("ADDRESS_NOT_ALLOWED", "Unsupported Live query: %s" % address)
 
     def _session_command(self, address, args):
@@ -139,6 +150,10 @@ class SessionOps(RackOps, AutomationOps):
             "/live/song/delete_scene": self._delete_scene,
             "/live/scene/set": self._set_scene,
             "/live/clip/set": self._set_clip,
+            "/live/clip/quantize": self._quantize_clip,
+            "/live/clip/duplicate_loop": self._duplicate_clip_loop,
+            "/live/clip/crop": self._crop_clip,
+            "/live/arrangement/place_section": self._place_section,
             "/live/clip_slot/duplicate_to": self._duplicate_clip,
             "/live/clip_slot/delete_clip": self._delete_clip,
             "/live/song/undo": self._undo,
@@ -161,6 +176,8 @@ class SessionOps(RackOps, AutomationOps):
             return self._rack_command(address, args)
         if address in AUTOMATION_COMMANDS:
             return self._automation_command(address, args)
+        if address in SONG_COMMANDS:
+            return self._song_command(address, args)
         handler = handlers.get(address)
         if handler is None:
             raise BridgeError("ADDRESS_NOT_ALLOWED", "Unsupported Live mutation: %s" % address)
@@ -1173,3 +1190,110 @@ class SessionOps(RackOps, AutomationOps):
             view.show_view("Browser")
         elif browser is False:
             view.hide_view("Browser")
+
+    # ------------------------------------------------------------------ note tools
+
+    def _quantize_clip(self, args):
+        # args: track, scene, trackName, clipName, grid, amount (0-1), pitch (-1 for every note)
+        self._require_args(args, 7, "/live/clip/quantize")
+        _track_index, _scene_index, _track, slot = self._named_clip_slot(args)
+        grid = QUANTIZE_GRIDS.get(str(args[4]))
+        if grid is None:
+            raise BridgeError("INVALID_ARGUMENTS", "Grid must be one of: %s" % ", ".join(sorted(QUANTIZE_GRIDS)))
+        amount = self._finite_float(args[5], "Amount")
+        if amount < 0 or amount > 1:
+            raise BridgeError("INVALID_RANGE", "Amount must be from 0 to 1")
+        pitch = int(args[6])
+        clip = slot.clip
+        if pitch >= 0:
+            if self._clip_kind(clip) != "midi":
+                raise BridgeError("CLIP_NOT_MIDI", "Quantizing one pitch needs a MIDI clip")
+            self._require_method(clip, "quantize_pitch", "Quantizing one pitch")
+            clip.quantize_pitch(self._bounded_int(pitch, "Pitch", 0, 127), grid, amount)
+        else:
+            self._require_method(clip, "quantize", "Quantizing a clip")
+            clip.quantize(grid, amount)
+
+    def _duplicate_clip_loop(self, args):
+        # args: track, scene, trackName, clipName. Doubles the loop and copies its notes into the new half.
+        self._require_args(args, 4, "/live/clip/duplicate_loop")
+        _track_index, _scene_index, _track, slot = self._named_clip_slot(args)
+        if self._clip_kind(slot.clip) != "midi":
+            raise BridgeError("CLIP_NOT_MIDI", "Duplicating the loop needs a MIDI clip")
+        self._require_method(slot.clip, "duplicate_loop", "Duplicating a clip's loop")
+        slot.clip.duplicate_loop()
+
+    def _crop_clip(self, args):
+        # args: track, scene, trackName, clipName, confirm. Removes everything outside the loop (or markers).
+        self._require_args(args, 5, "/live/clip/crop")
+        _track_index, _scene_index, _track, slot = self._named_clip_slot(args)
+        self._confirmed(args[4], "Cropping a clip")
+        clip = slot.clip
+        if self._clip_kind(clip) != "midi":
+            self._require_method(clip, "crop", "Cropping a clip")
+            clip.crop()
+            return
+        # Live 12.4.16's Clip.crop() left a MIDI clip's notes and markers unchanged, so crop it here:
+        # keep the notes that start inside the loop (or the markers when not looping), move them to
+        # start at 0, and put the loop and markers at 0 to the region's length.
+        looping = bool(clip.looping)
+        start = float(clip.loop_start if looping else clip.start_marker)
+        end = float(clip.loop_end if looping else clip.end_marker)
+        if end <= start:
+            raise BridgeError("INVALID_RANGE", "The clip's region is empty")
+        length = end - start
+        clip.remove_notes_extended(0, 128, -16384.0, 16384.0 + start)
+        clip.remove_notes_extended(0, 128, end, 1000000.0)
+        vector = self._note_vector(clip)
+        for note in vector:
+            note.start_time = float(note.start_time) - start
+        if len(vector):
+            clip.apply_note_modifications(vector)
+        self._set_range(clip, "loop_start", "loop_end", 0.0, length)
+        self._set_range(clip, "start_marker", "end_marker", 0.0, length)
+
+    # ------------------------------------------------------------------ arrangement sections
+
+    def _place_section(self, args):
+        # args: track, scene, startBeats, endBeats. Fills [start, end) with copies of the Session clip,
+        # ending exactly at end: whole copies, then for a MIDI clip a shorter clip holding the notes that
+        # fit. An audio clip only gets whole copies, so its last part of the section may stay empty.
+        self._require_args(args, 4, "/live/arrangement/place_section")
+        track_index, scene_index, slot = self._clip_slot(args[:2])
+        if not slot.has_clip:
+            raise BridgeError("CLIP_NOT_FOUND", "No Session clip at track %d, scene %d" % (track_index, scene_index))
+        track = list(self.song().tracks)[track_index]
+        start = self._finite_float(args[2], "Start")
+        end = self._finite_float(args[3], "End")
+        if start < 0 or end <= start or end > MAX_ARRANGEMENT_BEATS:
+            raise BridgeError("INVALID_RANGE", "The section must run forward, from 0 to at most %s beats" % MAX_ARRANGEMENT_BEATS)
+        for existing in list(track.arrangement_clips):
+            if float(existing.start_time) < end - 1e-6 and float(existing.end_time) > start + 1e-6:
+                raise BridgeError("ARRANGEMENT_OCCUPIED", "Track '%s' already has clip '%s' at %s-%s beats" % (track.name, existing.name, self._beat_text(float(existing.start_time)), self._beat_text(float(existing.end_time))))
+        clip = slot.clip
+        step = float(clip.length)
+        if step <= 0:
+            raise BridgeError("INVALID_RANGE", "The clip has no length")
+        if (end - start) / step > 512:
+            raise BridgeError("INVALID_RANGE", "The section would need more than 512 copies of the clip")
+        position = start
+        while position + step <= end + 1e-6:
+            track.duplicate_clip_to_arrangement(clip, position)
+            position += step
+        remainder = end - position
+        if remainder <= 1e-6 or self._clip_kind(clip) != "midi" or not callable(getattr(track, "create_midi_clip", None)):
+            return
+        # A shorter MIDI clip for the rest, with the notes from the start of the loop that fit in it.
+        loop_start = float(clip.loop_start) if bool(clip.looping) else float(clip.start_marker)
+        notes = [note for note in self._clip_notes(clip) if loop_start <= float(note.start_time) < loop_start + remainder]
+        tail = track.create_midi_clip(position, remainder)
+        if tail is None:
+            tail = next((item for item in list(track.arrangement_clips) if abs(float(item.start_time) - position) < 1e-6), None)
+        if tail is None:
+            raise BridgeError("CLIP_NOT_CREATED", "Live did not create the last part of the section on '%s'" % track.name)
+        tail.name = clip.name
+        if notes:
+            tail.add_new_notes(tuple(Live.Clip.MidiNoteSpecification(
+                pitch=int(note.pitch), start_time=float(note.start_time) - loop_start,
+                duration=min(float(note.duration), remainder - (float(note.start_time) - loop_start)),
+                velocity=float(note.velocity), mute=bool(note.mute)) for note in notes))
