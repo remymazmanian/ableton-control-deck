@@ -24,6 +24,7 @@ Also in Live 12.4.16, clip automation passed on a Drift track: a volume ramp fro
 
 ### Fixed
 
+- The MCP server exits when its agent disconnects. Before, the open bridge socket kept it running, so an agent that starts a server per request left one behind each time.
 - `get_device_parameters`, `list_device_parameters`, `set_device_parameter`, `get_plugin_parameters`, `find_plugin_parameter`, and `set_plugin_parameter` take `trackKind` for a return track or the master (setting also needs `expectedTrackName`). Tested in Live 12.4.16 on UAD Lexicon 480L on a return.
 - `save_live_set` reports a set with no unsaved changes as up to date instead of failing, and `get_unsaved_status` now reads whether the set has unsaved changes (macOS).
 - `load_plugin` and `load_plugin_on_track` refuse VST2 plugins, on both the server and Live's side; load the VST3 or AU version instead.

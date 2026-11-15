@@ -355,4 +355,8 @@ server.tool("load_user_library_item", "Load a User Library item, such as a saved
 const shutdown = () => { samples.close(); ableton.close(); omnihostClient.close(); process.exit(0); };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+// Exit when the agent disconnects. The open UDP socket would otherwise keep this process alive after its
+// stdin closes, and agents that start a server per request would leave one behind every time.
+process.stdin.on("end", shutdown);
+process.stdin.on("close", shutdown);
 await server.connect(new StdioServerTransport());
