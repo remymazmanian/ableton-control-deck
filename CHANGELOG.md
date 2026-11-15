@@ -22,6 +22,10 @@ In Live 12.4.16 view switching passed: to the Arrangement, the clip editor, the 
 
 Also in Live 12.4.16, clip automation passed on a Drift track: a volume ramp from silence to full (65 steps, all read back), A-Reverb send steps at −inf, −12, and −6 dB, an LP Freq ramp up and back down (97 steps), listing the three automated parameters, clearing one envelope and then all of them, and refusal of an out-of-range value, a point past the clip end, a stale parameter name, and clearing all without confirmation.
 
+### Fixed
+
+- `load_plugin`, `load_plugin_on_track`, `load_live_device`, and `load_user_library_item` can load onto a return track or the master: pass `trackKind` "return" or "master", as the mixer and device tools already take.
+
 ### Added
 
 - A signed, notarized macOS installer package (`npm run build:pkg`) with Node.js 26.13.0 for Apple silicon and Intel, checked against nodejs.org's checksums and signature. A newer Homebrew Node.js is used when present. Settings, indexes, snapshots, and logs go in `~/Library/Application Support/Ableton Control Deck`, and the program stays read-only. **Uninstall Ableton Control Deck** removes the services, the remote script, the OmniHost device, and the program, and either keeps settings and snapshots or removes everything. Tested on macOS: install, a bridge round trip with Live 12.4.16, and both uninstall choices.
