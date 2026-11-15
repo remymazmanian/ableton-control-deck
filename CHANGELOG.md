@@ -24,11 +24,14 @@ Also in Live 12.4.16, clip automation passed on a Drift track: a volume ramp fro
 
 ### Fixed
 
+- `load_plugin` and `load_plugin_on_track` refuse VST2 plugins, on both the server and Live's side; load the VST3 or AU version instead.
 - `ableton_status` reports whether Live is playing or recording, with a warning while it records. While Live records, every change to the set and every device load is refused with LIVE_IS_RECORDING; playing, stopping, and switching recording and the metronome still work. Tested in Live 12.4.16: a tempo change and a device load were refused during Arrangement recording, and stopping it went through.
 - `load_plugin`, `load_plugin_on_track`, `load_live_device`, and `load_user_library_item` can load onto a return track or the master: pass `trackKind` "return" or "master", as the mixer and device tools already take.
 
 ### Added
 
+- `save_live_set` saves the open set in place on macOS by choosing File > Save Live Set (through Accessibility, the only UI automation Control Deck does), then confirms the .als file changed. A set that has never been saved is refused. `get_project_path` returns the open set's file. Tested in Live 12.4.16.
+- `list_plugin_presets` and `select_plugin_preset` list a plugin's own program list and switch to a preset by exact name, read back. In Live 12.4.16, Diva and Pigments (VST3) list only "Default"; their factory presets stay inside the plugins. A `.vstpreset` that Live lists loads with `load_plugin` (tested on a return track).
 - A signed, notarized macOS installer package (`npm run build:pkg`) with Node.js 26.13.0 for Apple silicon and Intel, checked against nodejs.org's checksums and signature. A newer Homebrew Node.js is used when present. Settings, indexes, snapshots, and logs go in `~/Library/Application Support/Ableton Control Deck`, and the program stays read-only. **Uninstall Ableton Control Deck** removes the services, the remote script, the OmniHost device, and the program, and either keeps settings and snapshots or removes everything. Tested on macOS: install, a bridge round trip with Live 12.4.16, and both uninstall choices.
 - A signed Windows installer (`npm run build:win`) for x64 and Arm64, with Node.js 26.13.0 for the PC's own architecture, checked against nodejs.org's checksums and its OpenJS Foundation signature. It installs for the signed-in user with no administrator prompt, adds a Start menu entry for the dashboard, and is listed in Installed apps, where uninstalling asks whether to keep settings and snapshots. Tested on an i7 desktop and a Snapdragon Surface: install, update over an existing install, and both uninstall choices.
 - `npm run uninstall` does the same for a checkout.

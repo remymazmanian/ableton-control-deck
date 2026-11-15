@@ -6,6 +6,7 @@ import { z } from "zod";
 import { AbletonCommands } from "./commands.js";
 import { LiveTools } from "./live-tools.js";
 import { SampleIndex } from "./sample-index.js";
+import { LiveSave } from "./live-save.js";
 import { LocalCapabilities } from "./local-capabilities.js";
 import { AbletonClient } from "./ableton-client.js";
 import { PluginTools } from "./plugin-tools.js";
@@ -27,6 +28,7 @@ const live = new LiveTools(ableton, undefined, process.env.CONTROL_DECK_DRY_RUN 
 const samples = new SampleIndex();
 const local = new LocalCapabilities();
 const plugins = new PluginTools(ableton, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
+const liveSave = new LiveSave();
 const omnihostClient = new OmnihostClient();
 const session = new ArrangementBuilder(ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1", async id => String((await samples.getMetadata({ id }) as { path: string }).path));
 const omnihost = new OmnihostTools(omnihostClient, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
@@ -223,6 +225,12 @@ server.tool("set_drum_pad", "Mute or solo a Drum Rack pad, by its note (a number
 server.tool("rack_variation", "Store the rack's current macros as a new variation, recall or delete a variation by index, or randomize the macros. Deleting needs confirm=true. Needs Live 11 or newer.", {
   ...rackTarget, action: z.enum(["store", "recall", "delete", "randomize"]), variationIndex: z.number().int().min(0).optional(), confirm: z.boolean().default(false), dryRun: z.boolean().default(false)
 }, async input => response(await session.rackVariation(input)));
+server.tool("list_plugin_presets", "List a plugin's own presets (the program list the plugin gives Live) and which is selected, optionally filtered by query. Many plugins list only their current bank, and some list none; presets saved as files are in list_installed_plugins instead.", {
+  ...deviceTarget, query: z.string().optional(), limit: z.number().int().min(1).max(2000).optional()
+}, async input => response(await session.listPluginPresets(input)));
+server.tool("select_plugin_preset", "Switch a plugin to one of its own presets by exact name (from list_plugin_presets), then read the selection back. Pass presetIndex when several presets share a name.", {
+  ...deviceTarget, presetName: z.string().min(1), presetIndex: z.number().int().min(0).optional(), dryRun: z.boolean().default(false)
+}, async input => response(await session.selectPluginPreset(input)));
 server.tool("get_meters", "Read every track's, return track's, and the master's output meter right now, in dB (left, right, and peak). Live's meters move in steps of about 1.5 dB, and read silence while Live is stopped.", {}, async () => response(await session.getMeters()));
 server.tool("mix_check", "Sample the output meters while Live plays (default 4 seconds) and report peak and average level per track, then flag problems: anything over 0 dBFS, a master with under 1 dB of headroom, a track playing a clip but making no sound, a track leaning hard left or right, and a track 24 dB or more below the loudest. Start playback first.", { seconds: z.number().min(1).max(30).default(4) }, async input => response(await session.mixCheck(input)));
 const automationParameter = z.discriminatedUnion("kind", [
@@ -315,14 +323,14 @@ server.tool("refresh_sample_index", "Refresh the sample index. Rebuild requires 
 const templateCategory = z.enum(["trackTemplates", "instrumentRacks", "audioEffectRacks", "drumRacks", "defaultProjectTemplates", "favoriteSerumPresets", "favoriteDeviceChains"]);
 server.tool("list_templates", "List user-configured templates, racks, presets, and device chains.", { category: templateCategory.optional() }, async ({ category }) => response(await local.listTemplates(category)));
 server.tool("load_track_template", "Report verified track-template loading capability.", { path: z.string(), dryRun: z.boolean().default(false) }, async () => response(local.unsupportedLoad("load_track_template", "track templates")));
-server.tool("load_device_preset", "Report verified device-preset loading capability.", { path: z.string(), trackIndex: z.number().int().min(0), dryRun: z.boolean().default(false) }, async () => response(local.unsupportedLoad("load_device_preset", "device presets")));
+server.tool("load_device_preset", "Does not load anything. Load presets with: load_live_device (Live device presets by name, such as a Drift or Operator preset), load_plugin (a plugin preset file Live lists, such as a .vstpreset from list_installed_plugins), load_user_library_item (your own saved presets and racks), or select_plugin_preset (a plugin's own program list).", { path: z.string(), trackIndex: z.number().int().min(0), dryRun: z.boolean().default(false) }, async () => response(local.unsupportedLoad("load_device_preset", "device presets")));
 server.tool("load_drum_rack", "Report verified Drum Rack loading capability.", { path: z.string(), trackIndex: z.number().int().min(0), dryRun: z.boolean().default(false) }, async () => response(local.unsupportedLoad("load_drum_rack", "Drum Racks")));
 server.tool("load_instrument_rack", "Report verified Instrument Rack loading capability.", { path: z.string(), trackIndex: z.number().int().min(0), dryRun: z.boolean().default(false) }, async () => response(local.unsupportedLoad("load_instrument_rack", "Instrument Racks")));
 server.tool("load_effect_rack", "Report verified Audio Effect Rack loading capability.", { path: z.string(), trackIndex: z.number().int().min(0), dryRun: z.boolean().default(false) }, async () => response(local.unsupportedLoad("load_effect_rack", "Audio Effect Racks")));
 
-server.tool("get_project_path", "Return the project path when the control layer supports it.", {}, async () => response(local.getProjectPath()));
+server.tool("get_project_path", "Return the open Live Set's .als file. macOS only.", {}, async () => response(await liveSave.projectPath()));
 server.tool("get_unsaved_status", "Return Live's unsaved status when the control layer supports it.", {}, async () => response(local.getUnsavedStatus()));
-server.tool("save_live_set", "Save the current Live Set when supported.", {}, async () => response(local.save("save_live_set")));
+server.tool("save_live_set", "Save the open Live Set to its file (File > Save Live Set), then confirm the file changed. macOS only; the set must have been saved once already.", { dryRun: z.boolean().default(false) }, async ({ dryRun }) => response(await liveSave.save(dryRun)));
 server.tool("save_live_set_as", "Save the current Live Set to an explicit path when supported.", { path: z.string(), overwrite: z.boolean().default(false) }, async () => response(local.save("save_live_set_as")));
 server.tool("create_project_version", "Propose a collision-safe version filename; saving remains unavailable through the current bridge API.", { projectDirectory: z.string().optional(), projectName: z.string().optional(), overwrite: z.boolean().default(false) }, async input => response(await local.createProjectVersion(input)));
 
@@ -332,7 +340,7 @@ server.tool("list_installed_plugins", "Search Live's indexed VST3, VST2, and Aud
 server.tool("find_plugin", "Resolve the exact Live Browser path that would be loaded for a plugin name and format.", { name: z.string().min(1), format: pluginFormat }, async ({ name, format }) => response(await plugins.findPlugin(name, format)));
 server.tool("refresh_plugin_index", "Rebuild Control Deck Bridge's plugin index from Live's current Browser state.", {}, async () => response(await plugins.refreshPluginIndex()));
 const loadPluginSchema = { trackKind, trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), name: z.string().min(1), format: pluginFormat, expectedPath: z.string().optional(), dryRun: z.boolean().default(false) };
-server.tool("load_plugin", "Load a resolved plugin on an explicit track, return track (trackKind \"return\"), or the master, and verify the device chain through Control Deck Bridge.", loadPluginSchema, async input => response(await plugins.loadPlugin(input)));
+server.tool("load_plugin", "Load a resolved VST3 or AU plugin (VST2 is refused) on an explicit track, return track (trackKind \"return\"), or the master, and verify the device chain through Control Deck Bridge.", loadPluginSchema, async input => response(await plugins.loadPlugin(input)));
 server.tool("load_plugin_on_track", "Alias of load_plugin with the same explicit track and plugin safeguards.", loadPluginSchema, async input => response(await plugins.loadPlugin(input)));
 server.tool("find_live_device", "Resolve the exact Live Browser path for a native Live device or factory preset (kit, rack) from the Instruments, Audio Effects, MIDI Effects, or Drums categories. A preset can be named with or without its extension, such as Strutter Kit.", { name: z.string().min(1), path: z.string().optional() }, async ({ name, path }) => response(await plugins.findLiveDevice(name, path)));
 server.tool("load_live_device", "Load a native Live device or factory preset (e.g. Drum Rack, Echo, Reverb, Strutter Kit) on an explicit track, return track, or the master (trackKind) through Live's Browser, refusing ambiguous names and verifying the device chain.", {

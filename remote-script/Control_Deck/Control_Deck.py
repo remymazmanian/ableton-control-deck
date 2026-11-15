@@ -904,6 +904,8 @@ class ControlDeckBridge(SessionOps, ControlSurface):
     def _load_plugin(self, params):
         path = params.get("path")
         entry = resolve_plugin(self._get_plugins(), params.get("name"), params.get("format"), path)
+        if entry.get("format") == "vst2":
+            raise BridgeError("VST2_NOT_ALLOWED", "'%s' is a VST2 plugin. Control Deck does not load VST2 plugins; use its VST3 or AU version." % entry.get("name"))
         track_index, track = self._load_target(params)
 
         try:

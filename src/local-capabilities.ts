@@ -22,15 +22,12 @@ export class LocalCapabilities {
   }
 
   unsupportedLoad(tool: string, kind: string): ToolResult {
+    if (tool === "load_device_preset") return unsupported(tool, "Load presets with load_live_device (Live device presets by name), load_plugin (a .vstpreset that list_installed_plugins shows), load_user_library_item (your saved presets and racks), or select_plugin_preset (a plugin's own program list).");
     return unsupported(tool, `The current bridge API does not yet load ${kind}. Add it to config/templates.json for discovery, then load it manually in Live.`);
   }
 
-  getProjectPath(): ToolResult {
-    return unsupported("get_project_path", "The current bridge API does not expose the current Live Set document path.");
-  }
-
-  save(tool: "save_live_set" | "save_live_set_as"): ToolResult {
-    return unsupported(tool, "The current bridge API does not expose Live Set save or save-as. UI automation is intentionally disabled, so no save was attempted.");
+  save(tool: "save_live_set_as"): ToolResult {
+    return unsupported(tool, "Save As needs Live's file dialog, which Control Deck does not drive. Use save_live_set to save in place, or Save Live Set As in Live.");
   }
 
   async createProjectVersion(input: { projectDirectory?: string; projectName?: string; overwrite?: boolean }): Promise<ToolResult> {

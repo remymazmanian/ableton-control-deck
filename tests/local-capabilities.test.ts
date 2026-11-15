@@ -12,7 +12,7 @@ describe("local capability boundaries", () => {
     expect(await nextVersionedFilename(directory, "Night Drive.als")).toBe(join(directory, "Night Drive - v004.als"));
   });
 
-  it("returns an explicit unsupported save error", () => {
-    expect(new LocalCapabilities().save("save_live_set")).toMatchObject({ ok: false, error: { code: "UNSUPPORTED_CAPABILITY" } });
+  it("refuses Save As, which needs a file dialog", () => {
+    expect(new LocalCapabilities().save("save_live_set_as")).toMatchObject({ ok: false, error: { code: "UNSUPPORTED_CAPABILITY" } });
   });
 });
