@@ -180,4 +180,39 @@ export class RackTools extends SessionTools {
       return { device: input.expectedDeviceName, path: input.path, before, after };
     });
   }
+
+  /**
+   * The older top-level parameter tools for a return track or the master, which they only reach through
+   * the device path code: list (optionally filtered by name), or set by parameter name or index.
+   */
+  topLevelParameters(input: { tool: string; trackKind: TrackKind; trackIndex: number; deviceIndex: number; expectedDeviceName?: string; query?: string; exact?: boolean }): Promise<ToolResult> {
+    return this.read(input.tool, async () => {
+      nonNegativeInteger(input.trackIndex, "Track index");
+      nonNegativeInteger(input.deviceIndex, "Device index");
+      const device = await this.pathParameters(input.trackKind, input.trackIndex, String(input.deviceIndex));
+      if (input.expectedDeviceName !== undefined && device.name !== input.expectedDeviceName) throw new Error(`Device safeguard failed: expected '${input.expectedDeviceName}', found '${device.name}'.`);
+      const query = input.query?.toLowerCase();
+      const parameters = device.parameters.map((parameter, index) => ({ ...parameter, index }))
+        .filter(parameter => !query || (input.exact ? parameter.name.toLowerCase() === query : parameter.name.toLowerCase().includes(query)));
+      return { trackKind: input.trackKind, trackIndex: input.trackIndex, deviceIndex: input.deviceIndex, name: device.name, className: device.className, parameters };
+    });
+  }
+
+  async setTopLevelParameter(input: { trackKind: TrackKind; trackIndex: number; expectedTrackName?: string; deviceIndex: number; expectedDeviceName: string; parameterName?: string; parameterIndex?: number; value?: number; normalizedValue?: number; dryRun?: boolean }): Promise<ToolResult> {
+    const tool = input.normalizedValue !== undefined ? "set_plugin_parameter" : "set_device_parameter";
+    let resolved: { index: number; name: string; value: number };
+    try {
+      if (!input.expectedTrackName) throw new Error(`expectedTrackName is required for a ${input.trackKind === "master" ? "master" : "return"} track.`);
+      const device = await this.pathParameters(input.trackKind, input.trackIndex, String(input.deviceIndex));
+      const index = input.parameterIndex ?? device.parameters.findIndex(parameter => parameter.name === input.parameterName);
+      const parameter = device.parameters[index];
+      if (!parameter) throw new Error(input.parameterName ? `'${device.name}' has no parameter named '${input.parameterName}'.` : `'${device.name}' has no parameter ${input.parameterIndex}.`);
+      if (input.parameterName !== undefined && parameter.name !== input.parameterName) throw new Error(`Parameter safeguard failed: expected parameter ${index} to be '${input.parameterName}', found '${parameter.name}'.`);
+      const value = input.normalizedValue !== undefined ? parameter.min + input.normalizedValue * (parameter.max - parameter.min) : input.value!;
+      resolved = { index, name: parameter.name, value };
+    } catch (error) {
+      return this.read(tool, async () => { throw error; });
+    }
+    return this.setDeviceParameterAtPath({ trackKind: input.trackKind, trackIndex: input.trackIndex, expectedTrackName: input.expectedTrackName!, path: String(input.deviceIndex), expectedDeviceName: input.expectedDeviceName, parameterIndex: resolved.index, expectedParameterName: resolved.name, value: resolved.value, dryRun: input.dryRun });
+  }
 }

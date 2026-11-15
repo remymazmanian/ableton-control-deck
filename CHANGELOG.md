@@ -24,6 +24,8 @@ Also in Live 12.4.16, clip automation passed on a Drift track: a volume ramp fro
 
 ### Fixed
 
+- `get_device_parameters`, `list_device_parameters`, `set_device_parameter`, `get_plugin_parameters`, `find_plugin_parameter`, and `set_plugin_parameter` take `trackKind` for a return track or the master (setting also needs `expectedTrackName`). Tested in Live 12.4.16 on UAD Lexicon 480L on a return.
+- `save_live_set` reports a set with no unsaved changes as up to date instead of failing, and `get_unsaved_status` now reads whether the set has unsaved changes (macOS).
 - `load_plugin` and `load_plugin_on_track` refuse VST2 plugins, on both the server and Live's side; load the VST3 or AU version instead.
 - `ableton_status` reports whether Live is playing or recording, with a warning while it records. While Live records, every change to the set and every device load is refused with LIVE_IS_RECORDING; playing, stopping, and switching recording and the metronome still work. Tested in Live 12.4.16: a tempo change and a device load were refused during Arrangement recording, and stopping it went through.
 - `load_plugin`, `load_plugin_on_track`, `load_live_device`, and `load_user_library_item` can load onto a return track or the master: pass `trackKind` "return" or "master", as the mixer and device tools already take.

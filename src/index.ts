@@ -35,6 +35,7 @@ const omnihost = new OmnihostTools(omnihostClient, ableton, undefined, process.e
 const server = new McpServer({ name: "ableton-control-deck", version });
 const response = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }], structuredContent: value as Record<string, unknown> });
 
+const trackKind = z.enum(["track", "return", "master"]).default("track");
 server.tool("ableton_status", "Check the Control Deck Bridge connection and read the transport: playing, and whether Live is recording. Call it first: while Live records, changes to the set are refused.", {}, async () => response(await commands.status()));
 server.tool("get_tempo", "Read the current Live Set tempo.", {}, async () => response(await commands.getTempo()));
 server.tool("set_tempo", "Set and verify the Live Set tempo.", { tempo: z.number().min(20).max(999), dryRun: z.boolean().default(false) }, async ({ tempo, dryRun }) => response(await commands.setTempo(tempo, dryRun)));
@@ -59,25 +60,26 @@ server.tool("list_clips", "List Session View clips, optionally restricted to one
 server.tool("get_selected_track", "Return the selected regular track and explicit index.", {}, async () => response(await live.getSelectedTrack()));
 server.tool("get_selected_clip", "Return the selected track/scene position and whether it contains a clip.", {}, async () => response(await live.getSelectedClip()));
 server.tool("list_devices", "List top-level devices on a track.", { trackIndex: z.number().int().min(0) }, async ({ trackIndex }) => response(await live.listDevices(trackIndex)));
-server.tool("get_device_parameters", "List parameters exposed by Ableton for a specific device.", { trackIndex: z.number().int().min(0), deviceIndex: z.number().int().min(0) }, async ({ trackIndex, deviceIndex }) => response(await live.getDeviceParameters(trackIndex, deviceIndex)));
-server.tool("list_device_parameters", "Alias of get_device_parameters.", { trackIndex: z.number().int().min(0), deviceIndex: z.number().int().min(0) }, async ({ trackIndex, deviceIndex }) => response(await live.getDeviceParameters(trackIndex, deviceIndex)));
-server.tool("set_device_parameter", "Set an exposed parameter using stable indices and a required expected device-name safeguard.", {
-  trackIndex: z.number().int().min(0), deviceIndex: z.number().int().min(0), parameterIndex: z.number().int().min(0), value: z.number(), expectedDeviceName: z.string().min(1), dryRun: z.boolean().default(false)
-}, async ({ trackIndex, deviceIndex, parameterIndex, value, expectedDeviceName, dryRun }) => response(await live.setDeviceParameter(trackIndex, deviceIndex, parameterIndex, value, expectedDeviceName, dryRun)));
+server.tool("get_device_parameters", "List parameters exposed by Ableton for a specific device. For a return track or the master, pass trackKind (and expectedTrackName when setting).", { trackKind: trackKind.optional(), trackIndex: z.number().int().min(0), deviceIndex: z.number().int().min(0) }, async ({ trackKind, trackIndex, deviceIndex }) => response(trackKind && trackKind !== "track" ? await session.topLevelParameters({ tool: "get_device_parameters", trackKind, trackIndex, deviceIndex }) : await live.getDeviceParameters(trackIndex, deviceIndex)));
+server.tool("list_device_parameters", "Alias of get_device_parameters.", { trackKind: trackKind.optional(), trackIndex: z.number().int().min(0), deviceIndex: z.number().int().min(0) }, async ({ trackKind, trackIndex, deviceIndex }) => response(trackKind && trackKind !== "track" ? await session.topLevelParameters({ tool: "list_device_parameters", trackKind, trackIndex, deviceIndex }) : await live.getDeviceParameters(trackIndex, deviceIndex)));
+server.tool("set_device_parameter", "Set an exposed parameter using stable indices and a required expected device-name safeguard. For a return track or the master, pass trackKind (and expectedTrackName when setting).", {
+  trackKind: trackKind.optional(), trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1).optional(), deviceIndex: z.number().int().min(0), parameterIndex: z.number().int().min(0), value: z.number(), expectedDeviceName: z.string().min(1), dryRun: z.boolean().default(false)
+}, async ({ trackKind, trackIndex, expectedTrackName, deviceIndex, parameterIndex, value, expectedDeviceName, dryRun }) => response(trackKind && trackKind !== "track"
+  ? await session.setTopLevelParameter({ trackKind, trackIndex, expectedTrackName, deviceIndex, expectedDeviceName, parameterIndex, value, dryRun })
+  : await live.setDeviceParameter(trackIndex, deviceIndex, parameterIndex, value, expectedDeviceName, dryRun)));
 server.tool("list_plugin_devices", "List loaded third-party plugin devices, optionally restricted to one track.", { trackIndex: z.number().int().min(0).optional() }, async ({ trackIndex }) => response(await live.listPluginDevices(trackIndex)));
-server.tool("get_plugin_parameters", "List the controllable parameters for an exact loaded third-party plugin device.", {
-  trackIndex: z.number().int().min(0), deviceIndex: z.number().int().min(0), expectedDeviceName: z.string().min(1)
-}, async ({ trackIndex, deviceIndex, expectedDeviceName }) => response(await live.getPluginParameters(trackIndex, deviceIndex, expectedDeviceName)));
-server.tool("find_plugin_parameter", "Search an exact loaded third-party plugin device for parameters by name.", {
-  trackIndex: z.number().int().min(0), deviceIndex: z.number().int().min(0), expectedDeviceName: z.string().min(1), query: z.string().min(1), exact: z.boolean().default(false)
-}, async ({ trackIndex, deviceIndex, expectedDeviceName, query, exact }) => response(await live.findPluginParameter(trackIndex, deviceIndex, expectedDeviceName, query, exact)));
-server.tool("set_plugin_parameter", "Set a loaded third-party plugin parameter using an exact device/name safeguard, normalized 0-1 value, and Live read-back verification.", {
-  trackIndex: z.number().int().min(0), deviceIndex: z.number().int().min(0), expectedDeviceName: z.string().min(1),
+server.tool("get_plugin_parameters", "List the controllable parameters for an exact loaded third-party plugin device. For a return track or the master, pass trackKind (and expectedTrackName when setting).", {
+  trackKind: trackKind.optional(), trackIndex: z.number().int().min(0), deviceIndex: z.number().int().min(0), expectedDeviceName: z.string().min(1)
+}, async ({ trackKind, trackIndex, deviceIndex, expectedDeviceName }) => response(trackKind && trackKind !== "track" ? await session.topLevelParameters({ tool: "get_plugin_parameters", trackKind, trackIndex, deviceIndex, expectedDeviceName }) : await live.getPluginParameters(trackIndex, deviceIndex, expectedDeviceName)));
+server.tool("find_plugin_parameter", "Search an exact loaded third-party plugin device for parameters by name. For a return track or the master, pass trackKind (and expectedTrackName when setting).", {
+  trackKind: trackKind.optional(), trackIndex: z.number().int().min(0), deviceIndex: z.number().int().min(0), expectedDeviceName: z.string().min(1), query: z.string().min(1), exact: z.boolean().default(false)
+}, async ({ trackKind, trackIndex, deviceIndex, expectedDeviceName, query, exact }) => response(trackKind && trackKind !== "track" ? await session.topLevelParameters({ tool: "find_plugin_parameter", trackKind, trackIndex, deviceIndex, expectedDeviceName, query, exact }) : await live.findPluginParameter(trackIndex, deviceIndex, expectedDeviceName, query, exact)));
+server.tool("set_plugin_parameter", "Set a loaded third-party plugin parameter using an exact device/name safeguard, normalized 0-1 value, and Live read-back verification. For a return track or the master, pass trackKind (and expectedTrackName when setting).", {
+  trackKind: trackKind.optional(), trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1).optional(), deviceIndex: z.number().int().min(0), expectedDeviceName: z.string().min(1),
   parameterName: z.string().min(1), parameterIndex: z.number().int().min(0).optional(), normalizedValue: z.number().min(0).max(1), dryRun: z.boolean().default(false)
-}, async input => response(await live.setPluginParameter(input)));
+}, async ({ trackKind, expectedTrackName, ...input }) => response(trackKind && trackKind !== "track" ? await session.setTopLevelParameter({ trackKind, expectedTrackName, ...input }) : await live.setPluginParameter(input)));
 
 const dryRun = z.boolean().default(false);
-const trackKind = z.enum(["track", "return", "master"]).default("track");
 const hexColor = z.string().regex(/^#?[0-9a-fA-F]{6}$/, "Use a hex RGB color such as #FF8800");
 // Live's track fader tops out at +6 dB and a send knob at 0 dB.
 const volumeDecibels = z.union([z.number().min(-200).max(6), z.literal("-inf")]);
@@ -329,8 +331,8 @@ server.tool("load_instrument_rack", "Report verified Instrument Rack loading cap
 server.tool("load_effect_rack", "Report verified Audio Effect Rack loading capability.", { path: z.string(), trackIndex: z.number().int().min(0), dryRun: z.boolean().default(false) }, async () => response(local.unsupportedLoad("load_effect_rack", "Audio Effect Racks")));
 
 server.tool("get_project_path", "Return the open Live Set's .als file. macOS only.", {}, async () => response(await liveSave.projectPath()));
-server.tool("get_unsaved_status", "Return Live's unsaved status when the control layer supports it.", {}, async () => response(local.getUnsavedStatus()));
-server.tool("save_live_set", "Save the open Live Set to its file (File > Save Live Set), then confirm the file changed. macOS only; the set must have been saved once already.", { dryRun: z.boolean().default(false) }, async ({ dryRun }) => response(await liveSave.save(dryRun)));
+server.tool("get_unsaved_status", "Read whether the open Live Set has unsaved changes (Live's Save Live Set menu item is greyed out when it has none). macOS only.", {}, async () => response(await liveSave.unsavedStatus()));
+server.tool("save_live_set", "Save the open Live Set to its file (File > Save Live Set), then confirm the file changed. A set with no unsaved changes is reported as up to date without saving. macOS only; the set must have been saved once already.", { dryRun: z.boolean().default(false) }, async ({ dryRun }) => response(await liveSave.save(dryRun)));
 server.tool("save_live_set_as", "Save the current Live Set to an explicit path when supported.", { path: z.string(), overwrite: z.boolean().default(false) }, async () => response(local.save("save_live_set_as")));
 server.tool("create_project_version", "Propose a collision-safe version filename; saving remains unavailable through the current bridge API.", { projectDirectory: z.string().optional(), projectName: z.string().optional(), overwrite: z.boolean().default(false) }, async input => response(await local.createProjectVersion(input)));
 
