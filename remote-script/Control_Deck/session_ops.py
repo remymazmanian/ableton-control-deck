@@ -45,6 +45,7 @@ SESSION_QUERIES = (
     "/live/song/get/api_features",
     "/live/device/get/sample",
     "/live/devices/get/state",
+    "/live/device/get/presets",
     "/live/view/get/selection",
     "/live/meters/get",
     "/live/app_view/get",
@@ -74,6 +75,7 @@ SESSION_COMMANDS = (
     "/live/track/load_sample_to_arrangement",
     "/live/device/replace_sample",
     "/live/device/set_enabled",
+    "/live/device/set_preset",
     "/live/device/delete",
     "/live/view/select",
     "/live/app_view/show",
@@ -124,6 +126,8 @@ class SessionOps(RackOps, AutomationOps, SongOps):
             return self._device_sample(args)
         if address == "/live/devices/get/state":
             return self._devices_state(args)
+        if address == "/live/device/get/presets":
+            return self._device_presets(args)
         if address == "/live/view/get/selection":
             return self._selection()
         if address == "/live/meters/get":
@@ -168,6 +172,7 @@ class SessionOps(RackOps, AutomationOps, SongOps):
             "/live/track/load_sample_to_arrangement": self._load_sample_to_arrangement,
             "/live/device/replace_sample": self._replace_simpler_sample,
             "/live/device/set_enabled": self._set_device_enabled,
+            "/live/device/set_preset": self._set_device_preset,
             "/live/device/delete": self._delete_device,
             "/live/view/select": self._select,
             "/live/app_view/show": self._show_app_view,
@@ -1075,6 +1080,32 @@ class SessionOps(RackOps, AutomationOps, SongOps):
         if switch is None:
             raise BridgeError("DEVICE_NO_SWITCH", "Device '%s' has no on/off switch" % device.name)
         switch.value = switch.max if enabled else switch.min
+
+    def _plugin_presets(self, device):
+        presets = getattr(device, "presets", None)
+        if presets is None:
+            raise BridgeError("NOT_A_PLUGIN", "Device '%s' is not a plugin, so it has no plugin presets" % device.name)
+        return [str(name) for name in list(presets)]
+
+    def _device_presets(self, args):
+        # args: kind, index, trackName, deviceIndex, deviceName. Reply: count, the names, then the selected index (-1 if none).
+        self._require_args(args, 5, "/live/device/get/presets")
+        _kind, _track, _device_index, device = self._named_device(args)
+        names = self._plugin_presets(device)
+        selected = int(getattr(device, "selected_preset_index", -1))
+        return [len(names)] + names + [selected]
+
+    def _set_device_preset(self, args):
+        # args: kind, index, trackName, deviceIndex, deviceName, presetIndex, presetName
+        self._require_args(args, 7, "/live/device/set_preset")
+        _kind, _track, _device_index, device = self._named_device(args)
+        names = self._plugin_presets(device)
+        index = self._non_negative_index(args[5], "Preset index")
+        if index >= len(names):
+            raise BridgeError("INVALID_PRESET", "'%s' has %d presets; there is no preset %d" % (device.name, len(names), index))
+        if names[index] != str(args[6]):
+            raise BridgeError("PRESET_IDENTITY_MISMATCH", "Preset %d of '%s' is '%s', not '%s'" % (index, device.name, names[index], args[6]))
+        device.selected_preset_index = index
 
     def _delete_device(self, args):
         # args: kind, index, trackName, deviceIndex, deviceName, confirm

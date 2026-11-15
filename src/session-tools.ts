@@ -1062,6 +1062,48 @@ export class SessionTools {
     });
   }
 
+  /** A plugin's own preset list (Live's PluginDevice.presets) and which one is selected. */
+  private async pluginPresets(input: TrackTarget & { deviceIndex: number; expectedDeviceName: string }) {
+    const args = (await this.live.query("/live/device/get/presets", this.deviceArgs(input))).args;
+    const count = Number(args[0]);
+    if (!Number.isInteger(count) || args.length !== count + 2) throw new Error("Preset reply has the wrong length. Reinstall the Control Deck remote script and restart Live.");
+    return { names: args.slice(1, count + 1).map(String), selected: Number(args[count + 1]) };
+  }
+
+  listPluginPresets(input: TrackTarget & { deviceIndex: number; expectedDeviceName: string; query?: string; limit?: number }): Promise<ToolResult> {
+    return this.read("list_plugin_presets", async () => {
+      const { names, selected } = await this.pluginPresets(input);
+      const query = input.query?.trim().toLowerCase();
+      const matches = names.map((name, index) => ({ index, name })).filter(preset => !query || preset.name.toLowerCase().includes(query));
+      const limit = Math.min(Math.max(input.limit ?? 200, 1), 2000);
+      return { device: input.expectedDeviceName, presetCount: names.length, selected: selected >= 0 ? { index: selected, name: names[selected] ?? null } : null, matched: matches.length, presets: matches.slice(0, limit), truncated: matches.length > limit };
+    });
+  }
+
+  selectPluginPreset(input: TrackTarget & { deviceIndex: number; expectedDeviceName: string; presetName: string; presetIndex?: number; dryRun?: boolean }): Promise<ToolResult> {
+    let index = -1;
+    return this.change("select_plugin_preset", input, input.dryRun ?? false, async () => {
+      const { names, selected } = await this.pluginPresets(input);
+      const exact = names.flatMap((name, position) => (name === input.presetName ? [position] : []));
+      if (input.presetIndex !== undefined) {
+        if (names[input.presetIndex] !== input.presetName) throw new Error(`Preset ${input.presetIndex} is '${names[input.presetIndex] ?? "missing"}', not '${input.presetName}'.`);
+        index = input.presetIndex;
+      } else if (exact.length === 1) {
+        index = exact[0];
+      } else if (exact.length > 1) {
+        throw new Error(`${exact.length} presets are named '${input.presetName}' (indexes ${exact.slice(0, 10).join(", ")}); pass presetIndex.`);
+      } else {
+        const close = names.filter(name => name.toLowerCase().includes(input.presetName.toLowerCase())).slice(0, 10);
+        throw new Error(`No preset is named exactly '${input.presetName}'.${close.length ? ` Close matches: ${close.join(", ")}.` : ""}`);
+      }
+      return { address: "/live/device/set_preset", args: [...this.deviceArgs(input), oscInt(index), input.presetName], before: selected >= 0 ? names[selected] ?? null : null };
+    }, async before => {
+      const { value: after, settled } = await this.poll(() => this.pluginPresets(input), state => state.selected === index);
+      if (!settled) throw new Error(`The plugin shows preset ${after.selected}, not ${index} ('${input.presetName}').`);
+      return { device: input.expectedDeviceName, before, selected: { index, name: after.names[index] } };
+    });
+  }
+
   deleteDevice(input: TrackTarget & { deviceIndex: number; expectedDeviceName: string; confirm: boolean; dryRun?: boolean }): Promise<ToolResult> {
     return this.change("delete_device", input, input.dryRun ?? false, async () => {
       if (input.confirm !== true && !(input.dryRun ?? false)) throw new Error("delete_device requires confirm=true.");

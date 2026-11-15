@@ -554,6 +554,17 @@ class SessionOpsTests(unittest.TestCase):
         self.command("/live/device/set_enabled", "return", 0, "A-Reverb", 0, "Reverb", False)
         self.assertEqual(self.song.return_tracks[0].devices[0].parameters[0].value, 0.0)
 
+    def test_lists_and_selects_plugin_presets(self):
+        track = self.song.tracks[0]
+        plugin = types.SimpleNamespace(name="Diva", class_name="PluginDevice", parameters=[], presets=["Init", "Bass 1", "Pad"], selected_preset_index=0)
+        track.devices = [plugin, self.device("EQ Eight")]
+        self.assertEqual(self.query("/live/device/get/presets", "track", 0, "Drums", 0, "Diva"), [3, "Init", "Bass 1", "Pad", 0])
+        self.command("/live/device/set_preset", "track", 0, "Drums", 0, "Diva", 2, "Pad")
+        self.assertEqual(plugin.selected_preset_index, 2)
+        self.assertIn("is 'Bass 1', not 'Pad'", self.refused("/live/device/set_preset", "track", 0, "Drums", 0, "Diva", 1, "Pad"))
+        self.assertIn("not a plugin", self.refused("/live/device/set_preset", "track", 0, "Drums", 1, "EQ Eight", 0, "Init"))
+        self.assertEqual(plugin.selected_preset_index, 2)
+
     def test_deletes_a_device_only_with_confirm(self):
         track = self.song.tracks[0]
         track.devices = [self.device("EQ Eight"), self.device("Compressor")]

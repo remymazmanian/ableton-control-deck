@@ -25,12 +25,8 @@ export class LocalCapabilities {
     return unsupported(tool, `The current bridge API does not yet load ${kind}. Add it to config/templates.json for discovery, then load it manually in Live.`);
   }
 
-  getProjectPath(): ToolResult {
-    return unsupported("get_project_path", "The current bridge API does not expose the current Live Set document path.");
-  }
-
-  save(tool: "save_live_set" | "save_live_set_as"): ToolResult {
-    return unsupported(tool, "The current bridge API does not expose Live Set save or save-as. UI automation is intentionally disabled, so no save was attempted.");
+  save(tool: "save_live_set_as"): ToolResult {
+    return unsupported(tool, "Save As needs Live's file dialog, which Control Deck does not drive. Use save_live_set to save in place, or Save Live Set As in Live.");
   }
 
   async createProjectVersion(input: { projectDirectory?: string; projectName?: string; overwrite?: boolean }): Promise<ToolResult> {

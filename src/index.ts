@@ -6,6 +6,7 @@ import { z } from "zod";
 import { AbletonCommands } from "./commands.js";
 import { LiveTools } from "./live-tools.js";
 import { SampleIndex } from "./sample-index.js";
+import { LiveSave } from "./live-save.js";
 import { LocalCapabilities } from "./local-capabilities.js";
 import { AbletonClient } from "./ableton-client.js";
 import { PluginTools } from "./plugin-tools.js";
@@ -27,6 +28,7 @@ const live = new LiveTools(ableton, undefined, process.env.CONTROL_DECK_DRY_RUN 
 const samples = new SampleIndex();
 const local = new LocalCapabilities();
 const plugins = new PluginTools(ableton, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
+const liveSave = new LiveSave();
 const omnihostClient = new OmnihostClient();
 const session = new ArrangementBuilder(ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1", async id => String((await samples.getMetadata({ id }) as { path: string }).path));
 const omnihost = new OmnihostTools(omnihostClient, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
@@ -223,6 +225,12 @@ server.tool("set_drum_pad", "Mute or solo a Drum Rack pad, by its note (a number
 server.tool("rack_variation", "Store the rack's current macros as a new variation, recall or delete a variation by index, or randomize the macros. Deleting needs confirm=true. Needs Live 11 or newer.", {
   ...rackTarget, action: z.enum(["store", "recall", "delete", "randomize"]), variationIndex: z.number().int().min(0).optional(), confirm: z.boolean().default(false), dryRun: z.boolean().default(false)
 }, async input => response(await session.rackVariation(input)));
+server.tool("list_plugin_presets", "List a plugin's own presets (the program list the plugin gives Live) and which is selected, optionally filtered by query. Many plugins list only their current bank, and some list none; presets saved as files are in list_installed_plugins instead.", {
+  ...deviceTarget, query: z.string().optional(), limit: z.number().int().min(1).max(2000).optional()
+}, async input => response(await session.listPluginPresets(input)));
+server.tool("select_plugin_preset", "Switch a plugin to one of its own presets by exact name (from list_plugin_presets), then read the selection back. Pass presetIndex when several presets share a name.", {
+  ...deviceTarget, presetName: z.string().min(1), presetIndex: z.number().int().min(0).optional(), dryRun: z.boolean().default(false)
+}, async input => response(await session.selectPluginPreset(input)));
 server.tool("get_meters", "Read every track's, return track's, and the master's output meter right now, in dB (left, right, and peak). Live's meters move in steps of about 1.5 dB, and read silence while Live is stopped.", {}, async () => response(await session.getMeters()));
 server.tool("mix_check", "Sample the output meters while Live plays (default 4 seconds) and report peak and average level per track, then flag problems: anything over 0 dBFS, a master with under 1 dB of headroom, a track playing a clip but making no sound, a track leaning hard left or right, and a track 24 dB or more below the loudest. Start playback first.", { seconds: z.number().min(1).max(30).default(4) }, async input => response(await session.mixCheck(input)));
 const automationParameter = z.discriminatedUnion("kind", [
@@ -320,9 +328,9 @@ server.tool("load_drum_rack", "Report verified Drum Rack loading capability.", {
 server.tool("load_instrument_rack", "Report verified Instrument Rack loading capability.", { path: z.string(), trackIndex: z.number().int().min(0), dryRun: z.boolean().default(false) }, async () => response(local.unsupportedLoad("load_instrument_rack", "Instrument Racks")));
 server.tool("load_effect_rack", "Report verified Audio Effect Rack loading capability.", { path: z.string(), trackIndex: z.number().int().min(0), dryRun: z.boolean().default(false) }, async () => response(local.unsupportedLoad("load_effect_rack", "Audio Effect Racks")));
 
-server.tool("get_project_path", "Return the project path when the control layer supports it.", {}, async () => response(local.getProjectPath()));
+server.tool("get_project_path", "Return the open Live Set's .als file. macOS only.", {}, async () => response(await liveSave.projectPath()));
 server.tool("get_unsaved_status", "Return Live's unsaved status when the control layer supports it.", {}, async () => response(local.getUnsavedStatus()));
-server.tool("save_live_set", "Save the current Live Set when supported.", {}, async () => response(local.save("save_live_set")));
+server.tool("save_live_set", "Save the open Live Set to its file (File > Save Live Set), then confirm the file changed. macOS only; the set must have been saved once already.", { dryRun: z.boolean().default(false) }, async ({ dryRun }) => response(await liveSave.save(dryRun)));
 server.tool("save_live_set_as", "Save the current Live Set to an explicit path when supported.", { path: z.string(), overwrite: z.boolean().default(false) }, async () => response(local.save("save_live_set_as")));
 server.tool("create_project_version", "Propose a collision-safe version filename; saving remains unavailable through the current bridge API.", { projectDirectory: z.string().optional(), projectName: z.string().optional(), overwrite: z.boolean().default(false) }, async input => response(await local.createProjectVersion(input)));
 
