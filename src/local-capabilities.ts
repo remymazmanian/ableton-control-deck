@@ -39,9 +39,6 @@ export class LocalCapabilities {
     return result;
   }
 
-  getUnsavedStatus(): ToolResult {
-    return unsupported("get_unsaved_status", "The current bridge API does not expose Live's modified/unsaved state.");
-  }
 }
 
 export async function nextVersionedFilename(directory: string, projectName: string): Promise<string> {
