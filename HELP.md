@@ -223,6 +223,16 @@ Live names an untitled track after the first clip or sample it gets (`3-Audio` b
 
 Together with `add_midi_notes`, these give Session clips the same note editing as Arrangement clips.
 
+Note tools for Session clips:
+
+- **quantize_clip** — Live's own Quantize (Cmd-U) to a grid: `1/4`, `1/8`, `1/8T`, `1/8+1/8T`, `1/16`, `1/16T`, `1/16+1/16T`, or `1/32`, with an amount in percent (100 by default). Pass `pitch` (a number or a name such as `C1`) to quantize one note only. On an audio clip it quantizes the warp markers.
+- **transpose_clip_notes** — Transpose by semitones, optionally only notes in a pitch range (inclusive) or starting in a time range. Refused if any note would leave MIDI 0–127.
+- **humanize_clip_notes** — Shift each note's start by up to `timing` beats (0.01 by default) and its velocity by up to `velocity` (8 by default). The result includes the seed; the same seed gives the same result.
+- **duplicate_clip_loop** — Double the loop and copy its notes into the new half, like Live's Duplicate Loop.
+- **crop_clip** — Remove everything outside the loop (or the markers, when the clip isn't looping) and move what's left to start at 0, like Live's Crop Clip. Needs `confirm: true`. Live 12.4.16's `Clip.crop()` left MIDI clips unchanged, so MIDI clips are cropped by the bridge itself in one undo step; audio clips use Live's crop, and the call fails if Live leaves the clip where it was.
+
+Transpose and humanize read every changed note back, and large edits are split into batches that fit one datagram.
+
 Colors are hex RGB such as `#FF8800`. Live snaps a color to its own palette, so `set_clip`, `set_track`, and `set_scene` report the color Live chose and `colorSnapped: true` when it differs from the one asked for (for example, `#34C759` becomes `#539F31`).
 
 ### Undo

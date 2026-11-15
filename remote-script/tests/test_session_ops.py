@@ -222,6 +222,10 @@ class SessionSong(Song):
         self.tracks.insert(index + 1, SessionTrack(self.tracks[index].name))
 
 
+def make_audio_clip():
+    return SessionClip("Take", midi=False)
+
+
 class SessionOpsTests(unittest.TestCase):
     def setUp(self):
         self.song = SessionSong()
@@ -638,6 +642,42 @@ class SessionOpsTests(unittest.TestCase):
         self.assertIn("session or arrangement", self.refused("/live/app_view/show", "mixer", None, None))
         self.assertIn("clip, devices, or hide", self.refused("/live/app_view/show", None, "notes", None))
         self.assertIn("Choose a view", self.refused("/live/app_view/show", None, None, None))
+
+    # ---------------------------------------------------------------- note tools
+
+    def test_quantizes_a_clip_or_one_pitch_with_lives_grid_values(self):
+        clip = NoteClip("Beat", [(36, 0.1)])
+        calls = []
+        clip.quantize = lambda grid, amount: calls.append(("all", grid, amount))
+        clip.quantize_pitch = lambda pitch, grid, amount: calls.append((pitch, grid, amount))
+        self.song.tracks[0].clip_slots[0].clip = clip
+        self.command("/live/clip/quantize", 0, 0, "Drums", "Beat", "1/16", 0.5, -1)
+        self.command("/live/clip/quantize", 0, 0, "Drums", "Beat", "1/8T", 1.0, 36)
+        self.assertEqual(calls, [("all", 5, 0.5), (36, 3, 1.0)])
+        self.assertIn("Grid must be one of", self.refused("/live/clip/quantize", 0, 0, "Drums", "Beat", "1/12", 1.0, -1))
+        self.assertIn("from 0 to 1", self.refused("/live/clip/quantize", 0, 0, "Drums", "Beat", "1/16", 1.5, -1))
+
+    def test_duplicates_a_loop_and_crops_only_with_confirm(self):
+        clip = NoteClip("Beat", [(36, 0.0)])
+        calls = []
+        clip.duplicate_loop = lambda: calls.append("duplicate")
+        self.song.tracks[0].clip_slots[0].clip = clip
+        self.command("/live/clip/duplicate_loop", 0, 0, "Drums", "Beat")
+        self.assertEqual(calls, ["duplicate"])
+        self.assertIn("confirm", self.refused("/live/clip/crop", 0, 0, "Drums", "Beat", False))
+
+    def test_crops_a_midi_clip_to_its_loop_and_moves_it_to_zero(self):
+        clip = NoteClip("Beat", [(60, float(beat)) for beat in range(8)])
+        clip.end_marker = 8.0
+        clip.loop_end = 8.0
+        clip.loop_start = 4.0
+        self.song.tracks[0].clip_slots[0].clip = clip
+        self.command("/live/clip/crop", 0, 0, "Drums", "Beat", True)
+        self.assertEqual(sorted(note.start_time for note in clip._notes), [0.0, 1.0, 2.0, 3.0])
+        self.assertEqual((clip.loop_start, clip.loop_end, clip.start_marker, clip.end_marker), (0.0, 4.0, 0.0, 4.0))
+        self.assertEqual(self.song.undo_log, ["begin", "end"])
+        self.song.tracks[1].clip_slots[0].clip = make_audio_clip()
+        self.assertIn("needs a MIDI clip", self.refused("/live/clip/duplicate_loop", 1, 0, "Vox", "Take"))
 
     def test_lists_routing_options(self):
         values = self.query("/live/track/get/routing_options", "track", 0)

@@ -74,6 +74,9 @@ SESSION_COMMANDS = (
     "/live/device/delete",
     "/live/view/select",
     "/live/app_view/show",
+    "/live/clip/quantize",
+    "/live/clip/duplicate_loop",
+    "/live/clip/crop",
 ) + RACK_COMMANDS + AUTOMATION_COMMANDS
 # Undo and redo move through Live's history, so they must not open a step of their own.
 # Same limit as Control_Deck.MAX_ARRANGEMENT_BEATS (importing it here would be circular).
@@ -81,6 +84,8 @@ MAX_ARRANGEMENT_BEATS = 1576800.0
 SAMPLE_EXTENSIONS = (".wav", ".aif", ".aiff", ".mp3", ".flac")
 # Selecting changes Live's view, not the set, so it is not an undoable step either.
 NO_UNDO_STEP = ("/live/song/undo", "/live/song/redo", "/live/view/select", "/live/app_view/show")
+# Live's RecordQuantization grid values for Clip.quantize.
+QUANTIZE_GRIDS = {"1/4": 1, "1/8": 2, "1/8T": 3, "1/8+1/8T": 4, "1/16": 5, "1/16T": 6, "1/16+1/16T": 7, "1/32": 8}
 # Live's application view names.
 MAIN_VIEWS = {"session": "Session", "arrangement": "Arranger"}
 DETAIL_VIEWS = {"clip": "Detail/Clip", "devices": "Detail/DeviceChain"}
@@ -139,6 +144,9 @@ class SessionOps(RackOps, AutomationOps):
             "/live/song/delete_scene": self._delete_scene,
             "/live/scene/set": self._set_scene,
             "/live/clip/set": self._set_clip,
+            "/live/clip/quantize": self._quantize_clip,
+            "/live/clip/duplicate_loop": self._duplicate_clip_loop,
+            "/live/clip/crop": self._crop_clip,
             "/live/clip_slot/duplicate_to": self._duplicate_clip,
             "/live/clip_slot/delete_clip": self._delete_clip,
             "/live/song/undo": self._undo,
@@ -1173,3 +1181,64 @@ class SessionOps(RackOps, AutomationOps):
             view.show_view("Browser")
         elif browser is False:
             view.hide_view("Browser")
+
+    # ------------------------------------------------------------------ note tools
+
+    def _quantize_clip(self, args):
+        # args: track, scene, trackName, clipName, grid, amount (0-1), pitch (-1 for every note)
+        self._require_args(args, 7, "/live/clip/quantize")
+        _track_index, _scene_index, _track, slot = self._named_clip_slot(args)
+        grid = QUANTIZE_GRIDS.get(str(args[4]))
+        if grid is None:
+            raise BridgeError("INVALID_ARGUMENTS", "Grid must be one of: %s" % ", ".join(sorted(QUANTIZE_GRIDS)))
+        amount = self._finite_float(args[5], "Amount")
+        if amount < 0 or amount > 1:
+            raise BridgeError("INVALID_RANGE", "Amount must be from 0 to 1")
+        pitch = int(args[6])
+        clip = slot.clip
+        if pitch >= 0:
+            if self._clip_kind(clip) != "midi":
+                raise BridgeError("CLIP_NOT_MIDI", "Quantizing one pitch needs a MIDI clip")
+            self._require_method(clip, "quantize_pitch", "Quantizing one pitch")
+            clip.quantize_pitch(self._bounded_int(pitch, "Pitch", 0, 127), grid, amount)
+        else:
+            self._require_method(clip, "quantize", "Quantizing a clip")
+            clip.quantize(grid, amount)
+
+    def _duplicate_clip_loop(self, args):
+        # args: track, scene, trackName, clipName. Doubles the loop and copies its notes into the new half.
+        self._require_args(args, 4, "/live/clip/duplicate_loop")
+        _track_index, _scene_index, _track, slot = self._named_clip_slot(args)
+        if self._clip_kind(slot.clip) != "midi":
+            raise BridgeError("CLIP_NOT_MIDI", "Duplicating the loop needs a MIDI clip")
+        self._require_method(slot.clip, "duplicate_loop", "Duplicating a clip's loop")
+        slot.clip.duplicate_loop()
+
+    def _crop_clip(self, args):
+        # args: track, scene, trackName, clipName, confirm. Removes everything outside the loop (or markers).
+        self._require_args(args, 5, "/live/clip/crop")
+        _track_index, _scene_index, _track, slot = self._named_clip_slot(args)
+        self._confirmed(args[4], "Cropping a clip")
+        clip = slot.clip
+        if self._clip_kind(clip) != "midi":
+            self._require_method(clip, "crop", "Cropping a clip")
+            clip.crop()
+            return
+        # Live 12.4.16's Clip.crop() left a MIDI clip's notes and markers unchanged, so crop it here:
+        # keep the notes that start inside the loop (or the markers when not looping), move them to
+        # start at 0, and put the loop and markers at 0 to the region's length.
+        looping = bool(clip.looping)
+        start = float(clip.loop_start if looping else clip.start_marker)
+        end = float(clip.loop_end if looping else clip.end_marker)
+        if end <= start:
+            raise BridgeError("INVALID_RANGE", "The clip's region is empty")
+        length = end - start
+        clip.remove_notes_extended(0, 128, -16384.0, 16384.0 + start)
+        clip.remove_notes_extended(0, 128, end, 1000000.0)
+        vector = self._note_vector(clip)
+        for note in vector:
+            note.start_time = float(note.start_time) - start
+        if len(vector):
+            clip.apply_note_modifications(vector)
+        self._set_range(clip, "loop_start", "loop_end", 0.0, length)
+        self._set_range(clip, "start_marker", "end_marker", 0.0, length)
