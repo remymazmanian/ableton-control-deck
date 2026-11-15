@@ -4,6 +4,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+In Live 12.4.16 MIDI files passed: a 300-note clip exported, refused a second export to the same file without `overwrite`, imported into another slot in two batches with every pitch and velocity identical and every time within 0.0005 beats, and refused import into an occupied slot.
+
 In Live 12.4.16 song settings passed: F# Dorian (and Bb read as A#), 50% groove, a 32-beat loop at beat 16, punch, overdub, and 1/16 record quantization, refusal of an unknown scale, a bad key, and Capture MIDI with nothing played, and every setting restored afterwards.
 
 In Live 12.4.16 the note tools passed: quantizing one pitch at 50% (C3 from 2.62 to 2.56 on a 1/16 grid), quantizing every note to 1/16, transposing a pitch range up an octave, refusing a transpose past 127, humanizing with a seed, duplicating the loop (4 notes to 8), and cropping to the second half of an 8-beat clip (notes moved to start at 0, loop and markers at 0 to 4). Live's own `Clip.crop()` left that MIDI clip unchanged, so the bridge crops MIDI clips itself.
@@ -14,6 +16,7 @@ Also in Live 12.4.16, clip automation passed on a Drift track: a volume ramp fro
 
 ### Added
 
+- `export_clip_midi` and `import_midi_file` write a Session clip to a Standard MIDI File and create a clip from one, with every note checked.
 - `get_song_settings`, `set_song_settings`, and `song_action`: the song's key and scale, groove, Arrangement loop, punch in and out, overdub, automation arm, and record quantization, plus Capture MIDI, Re-Enable Automation, and Back to Arrangement.
 - Note tools for Session clips: `quantize_clip` (Live's own Quantize, optionally one pitch), `transpose_clip_notes`, `humanize_clip_notes` (seeded, so it can be repeated), `duplicate_clip_loop`, and `crop_clip` (needs `confirm: true`).
 - `get_view` and `show_view` read and switch Live's main view (Session or Arrangement), show the clip editor or device chain or hide the Detail view, and show or hide the Browser. Switching is not an undo step.

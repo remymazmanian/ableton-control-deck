@@ -237,6 +237,13 @@ Note tools for Session clips:
 - **duplicate_clip_loop** — Double the loop and copy its notes into the new half, like Live's Duplicate Loop.
 - **crop_clip** — Remove everything outside the loop (or the markers, when the clip isn't looping) and move what's left to start at 0, like Live's Crop Clip. Needs `confirm: true`. Live 12.4.16's `Clip.crop()` left MIDI clips unchanged, so MIDI clips are cropped by the bridge itself in one undo step; audio clips use Live's crop, and the call fails if Live leaves the clip where it was.
 
+MIDI files:
+
+- **export_clip_midi** — Write a Session MIDI clip's notes to a Standard MIDI File (`.mid`) at an absolute path, with the song's tempo and time signature and the clip's name. Muted notes are left out. An existing file is only replaced with `overwrite: true`. The file is read back to check that every note is in it.
+- **import_midi_file** — Create a Session MIDI clip from a `.mid` file in an empty slot. If the file has more than one track with notes, pass `midiTrack`; the error lists them. The clip is as long as the notes, rounded up to whole bars, unless `lengthBeats` is given. Large files are added in batches and every note is read back.
+
+Files are written at 960 ticks per beat, so times survive a round trip to within about 0.0005 beats. Formats 0 and 1 are read; SMPTE-timed files are not.
+
 Transpose and humanize read every changed note back, and large edits are split into batches that fit one datagram.
 
 Colors are hex RGB such as `#FF8800`. Live snaps a color to its own palette, so `set_clip`, `set_track`, and `set_scene` report the color Live chose and `colorSnapped: true` when it differs from the one asked for (for example, `#34C759` becomes `#539F31`).
