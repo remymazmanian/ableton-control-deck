@@ -4,6 +4,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+In Live 12.4.16 snapshots passed: a snapshot of 6 tracks with 5 devices, no changes reported right after, then a diff listing exactly the six changes made (volume, Drift turned off, its LP Freq, a clip's notes and looping, and a new clip), and refusal of a name in use and a missing snapshot.
+
 In Live 12.4.16 the writing tools passed: `i VI III VII` in the song's A minor (A, F, C, G with bass), `I V vi IV` as a C major arpeggio, two bars of boom-bap on Strutter Kit's own kick, snare, and closed-hat pads with 30% swing, both playing (the mix check measured them), and refusal of an occupied slot and a bad numeral.
 
 In Live 12.4.16 MIDI files passed: a 300-note clip exported, refused a second export to the same file without `overwrite`, imported into another slot in two batches with every pitch and velocity identical and every time within 0.0005 beats, and refused import into an occupied slot.
@@ -18,6 +20,7 @@ Also in Live 12.4.16, clip automation passed on a Drift track: a volume ramp fro
 
 ### Added
 
+- `snapshot_set`, `list_snapshots`, and `diff_snapshot` save the set's state and list every change since in plain words: mix, routing, devices and their parameters, clips, notes, scenes, and song settings.
 - `write_chord_progression` writes Roman-numeral progressions, voice-led, in the song's key by default, with sustain, stab, offbeat, or arpeggio rhythms and an optional bass. `write_drum_pattern` writes five styles with swing and accents, mapped to a Drum Rack's pads by name.
 - `export_clip_midi` and `import_midi_file` write a Session clip to a Standard MIDI File and create a clip from one, with every note checked.
 - `get_song_settings`, `set_song_settings`, and `song_action`: the song's key and scale, groove, Arrangement loop, punch in and out, overdub, automation arm, and record quantization, plus Capture MIDI, Re-Enable Automation, and Back to Arrangement.

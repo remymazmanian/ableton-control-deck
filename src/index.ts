@@ -13,7 +13,7 @@ import { OmnihostClient } from "./omnihost-client.js";
 import { OmnihostTools } from "./omnihost-tools.js";
 import { LAUNCH_MODES, LAUNCH_QUANTIZATIONS, WARP_MODES } from "./session-tools.js";
 import { QUANTIZE_GRIDS } from "./note-tools.js";
-import { TheoryTools } from "./theory-tools.js";
+import { SnapshotTools } from "./snapshot-tools.js";
 import { DRUM_STYLES, SCALES } from "./theory.js";
 import { RECORD_QUANTIZATIONS } from "./song-tools.js";
 import { MAX_NOTES_PER_CALL } from "./note-chunks.js";
@@ -28,7 +28,7 @@ const samples = new SampleIndex();
 const local = new LocalCapabilities();
 const plugins = new PluginTools(ableton, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
 const omnihostClient = new OmnihostClient();
-const session = new TheoryTools(ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1", async id => String((await samples.getMetadata({ id }) as { path: string }).path));
+const session = new SnapshotTools(ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1", async id => String((await samples.getMetadata({ id }) as { path: string }).path));
 const omnihost = new OmnihostTools(omnihostClient, ableton, undefined, process.env.CONTROL_DECK_DRY_RUN === "1");
 const server = new McpServer({ name: "ableton-control-deck", version });
 const response = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }], structuredContent: value as Record<string, unknown> });
@@ -163,6 +163,9 @@ server.tool("write_drum_pattern", "Write a drum pattern as a new Session MIDI cl
   ...newClipTarget, style: z.enum(Object.keys(DRUM_STYLES) as [string, ...string[]]), bars: z.number().int().min(1).max(16).optional(), swing: z.number().min(0).max(100).optional(), velocity: z.number().int().min(1).max(127).optional(),
   usePads: z.boolean().optional(), notes: z.record(z.string(), z.number().int().min(0).max(127)).optional()
 }, async input => response(await session.writeDrumPattern(input)));
+server.tool("snapshot_set", "Save the set's state under a name: tempo, time signature, song settings, scenes, every track's mix, routing, devices and their parameter values, and every Session clip's settings and a fingerprint of its notes. Stored in the project's data/snapshots folder. A name in use needs overwrite=true.", { name: z.string().min(1).max(64), overwrite: z.boolean().default(false) }, async input => response(await session.snapshotSet(input)));
+server.tool("list_snapshots", "List saved set snapshots with when they were taken.", {}, async () => response(await session.listSnapshots()));
+server.tool("diff_snapshot", "Compare the set now (or another snapshot, with against) to a saved snapshot and list every change in plain words: tempo and song settings, scenes, track mix, routing, devices turned on or off, device parameters, and clips added, removed, changed, or with different notes.", { name: z.string().min(1).max(64), against: z.string().min(1).max(64).optional() }, async input => response(await session.diffSnapshot(input)));
 
 server.tool("get_undo_state", "Report whether Live can undo or redo.", {}, async () => response(await session.getUndoState()));
 server.tool("undo", "Undo Live's most recent step. Most Control Deck changes are one undo step (set_time_signature and add_locator are two), and the most recent step may be a change made by hand in Live.", { dryRun }, async ({ dryRun }) => response(await session.undo(dryRun)));

@@ -44,6 +44,7 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 - Set the song's key and scale, groove, Arrangement loop, punch, overdub, and record quantization; Capture MIDI
 - Switch between the Session and Arrangement views, and show or hide the clip editor, device chain, and Browser
 - Draw automation inside clips: steps or ramps for volume, pan, sends, or any device parameter, including inside racks
+- Take snapshots of the set and list exactly what changed since
 - Read every track's level in dB, and run a mix check that flags clipping, missing headroom, silent tracks, lopsided panning, and buried tracks
 - Reach into racks: set macros, store and recall macro variations, rename, mute, and solo chains, mute and solo drum pads, and set any parameter of a device inside a rack
 - Launch and stop Session clips and scenes, and see what is playing or queued
