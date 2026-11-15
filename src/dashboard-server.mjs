@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import http from "node:http";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { buildPluginIndex, readPluginIndex, searchPluginIndex } from "./plugin-index.mjs";
 
@@ -12,9 +12,11 @@ const PORT = Number(process.env.CONTROL_DECK_DASHBOARD_PORT || 50712);
 // copy-paste MCP configuration for this machine.
 const INSTALL_PATH = fileURLToPath(new URL("..", import.meta.url)).replace(/[\\/]$/, "");
 // The full path to the MCP server and the command that runs Node: a packaged install names its own
-// launcher (which picks a newer system Node over the bundled one); a checkout uses whatever "node" is.
+// launcher on macOS (which picks a newer system Node over the bundled one) or the bundled node.exe on
+// Windows, where the service runs it directly; a checkout uses whatever "node" is.
 const SERVER_ENTRY = fileURLToPath(new URL("../dist/src/index.js", import.meta.url));
-const NODE_COMMAND = process.env.CONTROL_DECK_NODE || "node";
+const PACKAGED = existsSync(fileURLToPath(new URL("../packaged.json", import.meta.url)));
+const NODE_COMMAND = process.env.CONTROL_DECK_NODE || (PACKAGED ? process.execPath : "node");
 
 // The bridge client is TypeScript and ships compiled in dist/. The service
 // still starts (and reports "waiting") when the project has not been built or

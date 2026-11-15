@@ -27,7 +27,8 @@
     "test:bridge": "python3 -B -m unittest discover -s remote-script/tests -p 'test_*.py'",
     "test:integration": "ABLETON_INTEGRATION=1 vitest run tests/integration.test.ts",
     "uninstall": "node scripts/uninstall.mjs",
-    "build:pkg": "zsh installer/macos/build-pkg.sh"
+    "build:pkg": "zsh installer/macos/build-pkg.sh",
+    "build:win": "zsh installer/windows/build-win.sh"
   },
   "engines": {
     "node": ">=20"
