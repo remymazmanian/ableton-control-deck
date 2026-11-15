@@ -39,6 +39,7 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 - Read, change, and remove notes in Session clips by note id; quantize, transpose, humanize, duplicate the loop, and crop
 - Load samples from your sample index, or any audio file, into a Session slot, the Arrangement, or Simpler
 - Turn devices on and off, and delete them with confirmation
+- Write chord progressions from Roman numerals (voice-led, in the song's key) and drum patterns mapped to your Drum Rack's pads
 - Export a clip to a MIDI file, and import a MIDI file into a clip
 - Set the song's key and scale, groove, Arrangement loop, punch, overdub, and record quantization; Capture MIDI
 - Switch between the Session and Arrangement views, and show or hide the clip editor, device chain, and Browser

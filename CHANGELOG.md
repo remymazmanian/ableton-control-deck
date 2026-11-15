@@ -4,6 +4,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+In Live 12.4.16 the writing tools passed: `i VI III VII` in the song's A minor (A, F, C, G with bass), `I V vi IV` as a C major arpeggio, two bars of boom-bap on Strutter Kit's own kick, snare, and closed-hat pads with 30% swing, both playing (the mix check measured them), and refusal of an occupied slot and a bad numeral.
+
 In Live 12.4.16 MIDI files passed: a 300-note clip exported, refused a second export to the same file without `overwrite`, imported into another slot in two batches with every pitch and velocity identical and every time within 0.0005 beats, and refused import into an occupied slot.
 
 In Live 12.4.16 song settings passed: F# Dorian (and Bb read as A#), 50% groove, a 32-beat loop at beat 16, punch, overdub, and 1/16 record quantization, refusal of an unknown scale, a bad key, and Capture MIDI with nothing played, and every setting restored afterwards.
@@ -16,6 +18,7 @@ Also in Live 12.4.16, clip automation passed on a Drift track: a volume ramp fro
 
 ### Added
 
+- `write_chord_progression` writes Roman-numeral progressions, voice-led, in the song's key by default, with sustain, stab, offbeat, or arpeggio rhythms and an optional bass. `write_drum_pattern` writes five styles with swing and accents, mapped to a Drum Rack's pads by name.
 - `export_clip_midi` and `import_midi_file` write a Session clip to a Standard MIDI File and create a clip from one, with every note checked.
 - `get_song_settings`, `set_song_settings`, and `song_action`: the song's key and scale, groove, Arrangement loop, punch in and out, overdub, automation arm, and record quantization, plus Capture MIDI, Re-Enable Automation, and Back to Arrangement.
 - Note tools for Session clips: `quantize_clip` (Live's own Quantize, optionally one pitch), `transpose_clip_notes`, `humanize_clip_notes` (seeded, so it can be repeated), `duplicate_clip_loop`, and `crop_clip` (needs `confirm: true`).
