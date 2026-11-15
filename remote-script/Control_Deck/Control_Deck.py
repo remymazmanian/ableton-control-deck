@@ -14,6 +14,12 @@ from .bridge_core import BridgeError, filter_plugins, format_from_path, machine_
 from .session_ops import SESSION_COMMANDS, SESSION_QUERIES, SessionOps
 
 
+# Commands allowed while Live records: playing, stopping, and switching recording and the metronome.
+TRANSPORT_COMMANDS = frozenset((
+    "/live/song/start_playing", "/live/song/stop_playing", "/live/song/continue_playing",
+    "/live/song/set/record_mode", "/live/song/set/session_record", "/live/song/stop_all_clips",
+    "/live/song/set/metronome",
+))
 SCRIPT_NAME = "Control Deck Bridge"
 SCRIPT_VERSION = "1.4.0"
 PROTOCOL = "ableton-control-deck/1"
@@ -144,7 +150,17 @@ class ControlDeckBridge(SessionOps, ControlSurface):
             self.log_message("(%s) %s failed: %s" % (SCRIPT_NAME, method, error))
             self._complete(address, request_id, False, error={"code": "BRIDGE_ERROR", "message": str(error)})
 
+    def _refuse_while_recording(self, what):
+        # Edits while Live records land in the recording (or in a take nobody asked for). Transport
+        # commands, including stopping the recording, are always allowed.
+        song = self.song()
+        recording = [label for label, prop in (("Arrangement recording", "record_mode"), ("Session recording", "session_record")) if getattr(song, prop, False)]
+        if recording:
+            raise BridgeError("LIVE_IS_RECORDING", "Live is recording (%s). Stop recording before %s; stop_recording ends Arrangement recording." % (" and ".join(recording), what))
+
     def _dispatch(self, method, params):
+        if method in ("plugins.load", "devices.load_user_item", "devices.load_browser_item"):
+            self._refuse_while_recording("loading a device")
         if method == "bridge.status":
             return self._status()
         if method == "plugins.list":
@@ -171,6 +187,8 @@ class ControlDeckBridge(SessionOps, ControlSurface):
         if method == "live.query":
             return self._live_query(params)
         if method == "live.command":
+            if str(params.get("address", "")) not in TRANSPORT_COMMANDS:
+                self._refuse_while_recording("changing the set")
             return self._live_command(params)
         raise BridgeError("METHOD_NOT_FOUND", "Unknown bridge method '%s'" % method)
 

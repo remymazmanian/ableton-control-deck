@@ -31,7 +31,16 @@ export class AbletonCommands {
     const started = performance.now();
     try {
       const reply = await this.live.query("/live/song/get/tempo");
-      const result = { connected: true, controlLayer: "Control Deck Bridge", protocol: "ableton-control-deck/1", host: process.env.CONTROL_DECK_HOST ?? "127.0.0.1", port: Number(process.env.CONTROL_DECK_PORT ?? 50711), tempo: reply.args[0] };
+      const [playing, arrangementRecording, sessionRecording] = await Promise.all(["is_playing", "record_mode", "session_record"].map(async prop => {
+        const value = (await this.live.query(`/live/song/get/${prop}`)).args[0];
+        return value === true || value === 1;
+      }));
+      const recording = arrangementRecording || sessionRecording;
+      const result = {
+        connected: true, controlLayer: "Control Deck Bridge", protocol: "ableton-control-deck/1", host: process.env.CONTROL_DECK_HOST ?? "127.0.0.1", port: Number(process.env.CONTROL_DECK_PORT ?? 50711), tempo: reply.args[0],
+        transport: { playing, arrangementRecording, sessionRecording },
+        ...(recording ? { warning: "Live is recording. Changes to the set are refused until recording stops (stop_recording ends Arrangement recording)." } : {})
+      };
       await this.logger.write({ tool: "ableton_status", args: {}, liveRequest: { address: "/live/song/get/tempo" }, response: reply, durationMs: performance.now() - started, success: true });
       return { ok: true, dryRun: false, tool: "ableton_status", data: result, confirmation: reply };
     } catch (error) {

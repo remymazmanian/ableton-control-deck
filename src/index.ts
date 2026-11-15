@@ -33,7 +33,7 @@ const omnihost = new OmnihostTools(omnihostClient, ableton, undefined, process.e
 const server = new McpServer({ name: "ableton-control-deck", version });
 const response = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }], structuredContent: value as Record<string, unknown> });
 
-server.tool("ableton_status", "Check the Control Deck Bridge connection and return Live status.", {}, async () => response(await commands.status()));
+server.tool("ableton_status", "Check the Control Deck Bridge connection and read the transport: playing, and whether Live is recording. Call it first: while Live records, changes to the set are refused.", {}, async () => response(await commands.status()));
 server.tool("get_tempo", "Read the current Live Set tempo.", {}, async () => response(await commands.getTempo()));
 server.tool("set_tempo", "Set and verify the Live Set tempo.", { tempo: z.number().min(20).max(999), dryRun: z.boolean().default(false) }, async ({ tempo, dryRun }) => response(await commands.setTempo(tempo, dryRun)));
 server.tool("list_tracks", "List tracks with stable explicit index identifiers.", {}, async () => response(await commands.listTracks()));

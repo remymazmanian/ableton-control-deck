@@ -232,6 +232,19 @@ class ControlDeckLiveTests(unittest.TestCase):
         with self.assertRaises(Exception):
             self.bridge._live_command({"address": "/live/song/save_as", "args": ["unsafe.als"]})
 
+    def test_refuses_changes_while_recording_but_allows_transport(self):
+        self.song.record_mode = True
+        with self.assertRaises(Exception) as refused:
+            self.bridge._dispatch("live.command", {"address": "/live/song/set/tempo", "args": [130.0]})
+        self.assertIn("Live is recording (Arrangement recording)", str(refused.exception))
+        self.assertEqual(self.song.tempo, 124.0)
+        with self.assertRaises(Exception):
+            self.bridge._dispatch("plugins.load", {"trackIndex": 0, "expectedTrackName": "Synth"})
+        self.bridge._dispatch("live.command", {"address": "/live/song/set/record_mode", "args": [False]})
+        self.assertFalse(self.song.record_mode)
+        self.bridge._dispatch("live.command", {"address": "/live/song/set/tempo", "args": [130.0]})
+        self.assertEqual(self.song.tempo, 130.0)
+
     def test_creates_an_arrangement_midi_clip_and_names_it(self):
         self.bridge._live_command({"address": "/live/track/create_arrangement_midi_clip", "args": [0, "Synth", 8.0, 4.0, "Hook"]})
         clip = self.song.tracks[0].arrangement_clips[0]
