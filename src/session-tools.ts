@@ -307,7 +307,7 @@ export class SessionTools {
     return { hasClip: hasClip === true, clipName: name === null ? null : String(name), playing: playing === true, triggered: triggered === true, recording: recording === true };
   }
 
-  private async sessionNotes(trackIndex: number, sceneIndex: number): Promise<{ clipName: string; notes: ArrangementNote[] }> {
+  protected async sessionNotes(trackIndex: number, sceneIndex: number): Promise<{ clipName: string; notes: ArrangementNote[] }> {
     const args = (await this.live.query("/live/session_clip/get/notes", [oscInt(trackIndex), oscInt(sceneIndex)])).args;
     if (args.length < 3 || args[0] !== trackIndex || args[1] !== sceneIndex) throw new Error(`Note reply was not addressed to track ${trackIndex}, scene ${sceneIndex}.`);
     return { clipName: String(args[2]), notes: parseNoteBody(args.slice(3), "Session") };
@@ -325,7 +325,7 @@ export class SessionTools {
     return names;
   }
 
-  private async clipProps(trackIndex: number, sceneIndex: number) {
+  protected async clipProps(trackIndex: number, sceneIndex: number) {
     const args = (await this.live.query("/live/clip/get/properties", [oscInt(trackIndex), oscInt(sceneIndex)])).args;
     return { kind: args[2], props: parsePairs(args, 3) };
   }
