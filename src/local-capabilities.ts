@@ -22,6 +22,7 @@ export class LocalCapabilities {
   }
 
   unsupportedLoad(tool: string, kind: string): ToolResult {
+    if (tool === "load_device_preset") return unsupported(tool, "Load presets with load_live_device (Live device presets by name), load_plugin (a .vstpreset that list_installed_plugins shows), load_user_library_item (your saved presets and racks), or select_plugin_preset (a plugin's own program list).");
     return unsupported(tool, `The current bridge API does not yet load ${kind}. Add it to config/templates.json for discovery, then load it manually in Live.`);
   }
 
