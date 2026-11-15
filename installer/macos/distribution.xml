@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+  <title>Ableton Control Deck</title>
+  <options customize="never" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+  <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+  <volume-check>
+    <allowed-os-versions>
+      <os-version min="13.0"/>
+    </allowed-os-versions>
+  </volume-check>
+  <choices-outline>
+    <line choice="default">
+      <line choice="com.abletondeck.controldeck"/>
+    </line>
+  </choices-outline>
+  <choice id="default"/>
+  <choice id="com.abletondeck.controldeck" visible="false">
+    <pkg-ref id="com.abletondeck.controldeck"/>
+  </choice>
+  <pkg-ref id="com.abletondeck.controldeck" version="@VERSION@" onConclusion="none">control-deck.pkg</pkg-ref>
+</installer-gui-script>

@@ -1,7 +1,7 @@
 // Platform details for macOS and Windows: where Live keeps its User Library, where plug-ins live,
 // and which drives count as external. Plain JavaScript so setup can use it before anything is built.
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -110,4 +110,15 @@ export function inTemporaryFolder(folder) {
 export function machineTokenPath(home = homedir(), env = process.env, platform = process.platform) {
   if (platform === "win32") return path.join(env.LOCALAPPDATA || path.join(env.USERPROFILE || home, "AppData", "Local"), "Ableton Control Deck", "bridge-token");
   return path.join(home, "Library", "Application Support", "Ableton Control Deck", "bridge-token");
+}
+
+/**
+ * Where settings, indexes, snapshots, and logs live. A checkout keeps them in its own config/, data/,
+ * and logs/. A packaged install (marked by packaged.json) is read-only, so they go in the same
+ * per-machine folder as the bridge secret. CONTROL_DECK_DATA overrides both.
+ */
+export function dataRoot(projectRoot, home = homedir(), env = process.env, platform = process.platform) {
+  if (env.CONTROL_DECK_DATA) return path.resolve(env.CONTROL_DECK_DATA);
+  if (existsSync(path.join(projectRoot, "packaged.json"))) return path.dirname(machineTokenPath(home, env, platform));
+  return projectRoot;
 }

@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { basename, dirname, extname, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { JsonLogger } from "./logger.js";
-import { fromProjectRoot } from "./paths.js";
+import { fromDataRoot } from "./paths.js";
 import { isExternalDrive } from "./external-drive.js";
 
 const AUDIO_EXTENSIONS = new Set([".wav", ".aif", ".aiff", ".mp3", ".flac"]);
@@ -27,14 +27,14 @@ export interface SampleSearch {
 export class SampleIndex {
   private db?: DatabaseSync;
   private config?: LibraryConfig;
-  constructor(private readonly configPath = fromProjectRoot("config/sample-library.json"), private readonly logger = new JsonLogger(), private readonly allowLocalRoot = process.env.NODE_ENV === "test") {}
+  constructor(private readonly configPath = fromDataRoot("config/sample-library.json"), private readonly logger = new JsonLogger(), private readonly allowLocalRoot = process.env.NODE_ENV === "test") {}
 
   private async setup(): Promise<{ db: DatabaseSync; config: LibraryConfig }> {
     if (this.db && this.config) return { db: this.db, config: this.config };
     const config = JSON.parse(await readFile(this.configPath, "utf8")) as LibraryConfig;
     if (!this.allowLocalRoot && !isExternalDrive(resolve(config.root))) throw new Error(process.platform === "win32" ? "Sample root must be an absolute path on a drive other than the system drive." : "Sample root must be an absolute path on an external volume.");
     await access(config.root, constants.R_OK);
-    const databasePath = fromProjectRoot(config.database);
+    const databasePath = fromDataRoot(config.database);
     await mkdir(dirname(databasePath), { recursive: true });
     const db = new DatabaseSync(databasePath);
     db.exec(`
@@ -70,7 +70,7 @@ export class SampleIndex {
     if (options.rebuild && !options.confirm) throw new Error("Rebuilding the sample database requires confirm=true.");
     const started = performance.now();
     const { db, config } = await this.setup();
-    const databasePath = fromProjectRoot(config.database);
+    const databasePath = fromDataRoot(config.database);
     const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const favorites = new Set(config.favorites.map(path => resolve(config.root, path)));
     const upsert = db.prepare(`INSERT INTO samples

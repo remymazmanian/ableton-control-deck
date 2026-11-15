@@ -1,0 +1,10 @@
+#!/bin/sh
+# Runs as root before files are replaced: stops the signed-in user's Control Deck services so an
+# upgrade never runs old and new code side by side. Setup starts them again afterwards.
+user=$(stat -f %Su /dev/console)
+[ -z "$user" ] || [ "$user" = "root" ] || [ "$user" = "loginwindow" ] && exit 0
+uid=$(id -u "$user")
+for label in com.abletondeck.api com.abletondeck.dashboard; do
+  launchctl bootout "gui/$uid/$label" 2>/dev/null
+done
+exit 0

@@ -4,11 +4,20 @@ import { useEffect, useState } from "react";
 import { BrandHeader } from "../brand-header";
 import { useDeckPreferences } from "../preferences";
 
-const PATH_PLACEHOLDER = "/path/to/ableton-control-deck";
+const ENTRY_PLACEHOLDER = "/path/to/ableton-control-deck/dist/src/index.js";
+
+type ServerCommand = { node: string; entry: string };
+
+/** A value for a shell command line, quoted when it has spaces. */
+function shellWord(value: string) {
+  if (!/[\s"'$]/.test(value)) return value;
+  if (/^[A-Za-z]:[\\/]/.test(value)) return `"${value}"`;
+  return `"${value.replace(/(["$`\\])/g, "\\$1")}"`;
+}
 
 export default function ConnectPage() {
   const { preferences, ready } = useDeckPreferences();
-  const [installPath, setInstallPath] = useState<string | null>(null);
+  const [server, setServer] = useState<ServerCommand | null>(null);
 
   useEffect(() => {
     if (!ready) return;
@@ -17,8 +26,11 @@ export default function ConnectPage() {
       try {
         const response = await fetch(`${preferences.apiBase}/health`, { cache: "no-store" });
         const health = await response.json();
-        if (!cancelled && typeof health.installPath === "string" && health.installPath.startsWith("/")) {
-          setInstallPath(health.installPath);
+        const absolute = (value: unknown) => typeof value === "string" && /^(\/|[A-Za-z]:[\\/])/.test(value);
+        if (!cancelled && absolute(health.serverEntry)) {
+          setServer({ entry: health.serverEntry, node: typeof health.nodeCommand === "string" && health.nodeCommand ? health.nodeCommand : "node" });
+        } else if (!cancelled && absolute(health.installPath)) {
+          setServer({ entry: `${health.installPath}/dist/src/index.js`, node: "node" });
         }
       } catch {
         // Local service offline — the guides fall back to a placeholder path.
@@ -27,13 +39,14 @@ export default function ConnectPage() {
     return () => { cancelled = true; };
   }, [ready, preferences.apiBase]);
 
-  const p = installPath ?? PATH_PLACEHOLDER;
-  const serverCommand = `node ${p}/dist/src/index.js`;
+  const node = server?.node ?? "node";
+  const entry = server?.entry ?? ENTRY_PLACEHOLDER;
+  const serverCommand = `${shellWord(node)} ${shellWord(entry)}`;
   const mcpServersJson = `{
   "mcpServers": {
     "ableton": {
-      "command": "node",
-      "args": ["${p}/dist/src/index.js"]
+      "command": ${JSON.stringify(node)},
+      "args": [${JSON.stringify(entry)}]
     }
   }
 }`;
@@ -54,8 +67,8 @@ export default function ConnectPage() {
         </div>
         <div className="settings-summary">
           <span>SERVER COMMAND</span>
-          <strong>{installPath ? "This machine" : "Path pending"}</strong>
-          <small>{installPath ? "Snippets use your real install path" : "Local service offline — snippets show a placeholder path"}</small>
+          <strong>{server ? "This machine" : "Path pending"}</strong>
+          <small>{server ? "Snippets use your real install path" : "Local service offline — snippets show a placeholder path"}</small>
         </div>
       </section>
 
@@ -103,7 +116,7 @@ export default function ConnectPage() {
           >
             <CodeBlock
               label="Terminal"
-              code={`claude mcp add --scope user ableton -- node ${p}/dist/src/index.js`}
+              code={`claude mcp add --scope user ableton -- ${serverCommand}`}
             />
             <p className="guide-text">
               Start a new Claude Code session, then check with <code>/mcp</code>. Ask it to
@@ -134,13 +147,13 @@ export default function ConnectPage() {
             <CodeBlock
               label="~/.codex/config.toml"
               code={`[mcp_servers.ableton]
-command = "node"
-args = ["${p}/dist/src/index.js"]
+command = ${JSON.stringify(node)}
+args = [${JSON.stringify(entry)}]
 startup_timeout_sec = 15.0`}
             />
             <p className="guide-text">
               Recent Codex CLI builds can also do this in one line:
-              <code> codex mcp add ableton -- node {p}/dist/src/index.js</code>.
+              <code> codex mcp add ableton -- {serverCommand}</code>.
             </p>
           </GuideSection>
 
@@ -157,8 +170,8 @@ startup_timeout_sec = 15.0`}
   "servers": {
     "ableton": {
       "type": "stdio",
-      "command": "node",
-      "args": ["${p}/dist/src/index.js"]
+      "command": ${JSON.stringify(node)},
+      "args": [${JSON.stringify(entry)}]
     }
   }
 }`}
@@ -187,7 +200,7 @@ startup_timeout_sec = 15.0`}
               confirm the <code>ableton</code> server loaded. Grok CLI is evolving quickly —
               if your build has an <code>mcp add</code> command or names the settings file
               differently, the values it needs are always the same two:
-              command <code>node</code>, argument <code>{p}/dist/src/index.js</code>.
+              command <code>{node}</code>, argument <code>{entry}</code>.
             </p>
           </GuideSection>
 
@@ -227,8 +240,8 @@ mcphost --config config.json -m ollama:qwen3`}
             </p>
             <CodeBlock label="Standard config" code={mcpServersJson} />
             <ul className="guide-list">
-              <li><strong>Command:</strong> <code>node</code></li>
-              <li><strong>Arguments:</strong> <code>{p}/dist/src/index.js</code></li>
+              <li><strong>Command:</strong> <code>{node}</code></li>
+              <li><strong>Arguments:</strong> <code>{entry}</code></li>
               <li><strong>Transport:</strong> stdio (no URL, no port)</li>
             </ul>
           </GuideSection>

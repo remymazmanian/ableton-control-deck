@@ -1,0 +1,21 @@
+#!/bin/sh
+# Runs as root after the package is installed: finishes setup for the signed-in user (bridge secret,
+# remote script in Live's User Library, background services), then opens the connection guide.
+RUNTIME="/Library/Application Support/Ableton Control Deck"
+user=$(stat -f %Su /dev/console)
+if [ -z "$user" ] || [ "$user" = "root" ] || [ "$user" = "loginwindow" ]; then
+  echo "Ableton Control Deck: nobody is signed in, so setup will finish the next time the app opens."
+  exit 0
+fi
+uid=$(id -u "$user")
+cd /tmp || exit 1
+launchctl asuser "$uid" sudo -u "$user" -H "$RUNTIME/bin/node" "$RUNTIME/scripts/setup.mjs"
+status=$?
+if [ "$status" -eq 0 ]; then
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    curl -fs -o /dev/null http://127.0.0.1:50713/connect && break
+    sleep 1
+  done
+  launchctl asuser "$uid" sudo -u "$user" open "http://127.0.0.1:50713/connect"
+fi
+exit "$status"

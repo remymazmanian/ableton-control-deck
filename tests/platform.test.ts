@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { isExternalDrive } from "../src/external-drive.js";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { machineTokenPath } from "../src/machine-token.js";
+import { dataRootFor } from "../src/paths.js";
 // @ts-expect-error -- plain JavaScript module shared with setup
 import * as platform from "../src/platform.mjs";
 
@@ -36,5 +40,22 @@ describe("platform helpers", () => {
     expect(platform.inTemporaryFolder("/Users/remy/Downloads/ableton-control-deck")).toBe("Downloads");
     expect(platform.inTemporaryFolder("C:\\Users\\remym\\OneDrive\\Desktop\\ableton-control-deck")).toBe("Desktop");
     expect(platform.inTemporaryFolder("C:\\Users\\remym\\Code\\ableton-control-deck")).toBeNull();
+  });
+
+  it("keeps a checkout's data in place and a packaged install's data per machine", () => {
+    const root = mkdtempSync(join(tmpdir(), "control-deck-root-"));
+    try {
+      const env = {};
+      expect(dataRootFor(root, "/Users/remy", env, "darwin")).toBe(root);
+      expect(platform.dataRoot(root, "/Users/remy", env, "darwin")).toBe(root);
+      writeFileSync(join(root, "packaged.json"), "{}");
+      expect(dataRootFor(root, "/Users/remy", env, "darwin")).toBe("/Users/remy/Library/Application Support/Ableton Control Deck");
+      expect(platform.dataRoot(root, "/Users/remy", env, "darwin")).toBe(dataRootFor(root, "/Users/remy", env, "darwin"));
+      const override = { CONTROL_DECK_DATA: join(root, "elsewhere") };
+      expect(dataRootFor(root, "/Users/remy", override, "darwin")).toBe(join(root, "elsewhere"));
+      expect(platform.dataRoot(root, "/Users/remy", override, "darwin")).toBe(join(root, "elsewhere"));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
