@@ -120,6 +120,12 @@ All tools follow the same contract: **exact targets** (mutations require indices
 - **select** — Select a track, a scene, or both, by index and current name, and read the selection back. Selecting both highlights that clip slot. Selection changes Live's view, not the set, so it is not an undo step.
 - **get_view** — Which main view Live shows (`session` or `arrangement`), and whether the Detail view (clip editor or devices) and the Browser are showing.
 - **show_view** — Switch between the Session (clip launch) view and the Arrangement view, show the clip editor or the device chain or hide the Detail view, and show or hide the Browser, in one call. The view is read back. Like selection, it changes Live's window, not the set, so it is not an undo step.
+
+### Song settings
+
+- **get_song_settings** — The key and scale (Live 12), scale mode and the scale's intervals, groove amount, the Arrangement loop (on, start, and length in beats), punch in and out, Arrangement overdub, Session automation arm, MIDI record quantization, and whether Capture MIDI and Re-Enable Automation are available.
+- **set_song_settings** — Change any of these in one undo step: `key` (`F#`, `Bb`, or 0–11), `scale` (a name from Live's Scale menu, such as `Major` or `Dorian`), `scaleMode`, `groovePercent` (0–131), `loop` (`enabled`, `startBeats`, `lengthBeats`), `punchIn`, `punchOut`, `arrangementOverdub`, `sessionAutomationRecord`, and `recordQuantization` (`none`, `1/4` … `1/32`). Every value is checked first and read back; Live ignores a scale name it does not know, and the result says so.
+- **song_action** — `capture_midi` (Live's Capture MIDI), `re_enable_automation`, or `back_to_arrangement`. Capture MIDI and Re-Enable Automation say so when there is nothing to do.
 - **get_transport** — Playback, position, tempo, metronome, recording, and loop state.
 - **get_time_signature** — The current time signature.
 
