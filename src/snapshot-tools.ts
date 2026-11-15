@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fromProjectRoot } from "./paths.js";
+import { fromDataRoot } from "./paths.js";
 import { parseMixer, parsePairs, parseScenes, type TrackKind } from "./session-tools.js";
 import { TheoryTools } from "./theory-tools.js";
 import { oscInt, type ToolResult } from "./types.js";
@@ -84,7 +84,7 @@ export function diffSnapshots(before: SetSnapshot, after: SetSnapshot): string[]
 }
 
 export class SnapshotTools extends TheoryTools {
-  private folder = fromProjectRoot("data/snapshots");
+  private folder = fromDataRoot("data/snapshots");
 
   private async capture(name: string): Promise<SetSnapshot> {
     const song = await this.live.query("/live/song/get/tempo");
