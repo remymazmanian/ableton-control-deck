@@ -871,20 +871,22 @@ class ControlDeckBridge(SessionOps, ControlSurface):
             child_name = str(getattr(child, "name", "Unnamed"))
             self._walk_plugins(child, path + [child_name], entries, depth + 1)
 
-    def _load_plugin(self, params):
-        path = params.get("path")
-        entry = resolve_plugin(self._get_plugins(), params.get("name"), params.get("format"), path)
+    def _load_target(self, params):
+        # A regular track, a return track, or the master (trackKind), checked against its current name.
         try:
             track_index = int(params.get("trackIndex"))
         except Exception:
             raise BridgeError("INVALID_TRACK", "trackIndex must be an integer")
-        tracks = list(self.song().tracks)
-        if track_index < 0 or track_index >= len(tracks):
-            raise BridgeError("INVALID_TRACK", "Track index %d does not exist" % track_index)
-        track = tracks[track_index]
+        kind, track_index, track = self._any_track([str(params.get("trackKind") or "track"), track_index])
         expected_name = str(params.get("expectedTrackName", ""))
         if track.name != expected_name:
-            raise BridgeError("TRACK_IDENTITY_MISMATCH", "Expected track '%s', found '%s'" % (expected_name, track.name))
+            raise BridgeError("TRACK_IDENTITY_MISMATCH", "Expected %s '%s', found '%s'" % (self._kind_label(kind), expected_name, track.name))
+        return track_index, track
+
+    def _load_plugin(self, params):
+        path = params.get("path")
+        entry = resolve_plugin(self._get_plugins(), params.get("name"), params.get("format"), path)
+        track_index, track = self._load_target(params)
 
         try:
             before_count = len(track.devices)
@@ -989,17 +991,7 @@ class ControlDeckBridge(SessionOps, ControlSurface):
         return self._load_item_on_track(item, params, loaded)
 
     def _load_item_on_track(self, item, params, loaded):
-        try:
-            track_index = int(params.get("trackIndex"))
-        except Exception:
-            raise BridgeError("INVALID_TRACK", "trackIndex must be an integer")
-        tracks = list(self.song().tracks)
-        if track_index < 0 or track_index >= len(tracks):
-            raise BridgeError("INVALID_TRACK", "Track index %d does not exist" % track_index)
-        track = tracks[track_index]
-        expected_name = str(params.get("expectedTrackName", ""))
-        if track.name != expected_name:
-            raise BridgeError("TRACK_IDENTITY_MISMATCH", "Expected track '%s', found '%s'" % (expected_name, track.name))
+        track_index, track = self._load_target(params)
 
         try:
             before_count = len(track.devices)
