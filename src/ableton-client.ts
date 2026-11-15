@@ -2,6 +2,7 @@ import dgram, { type RemoteInfo } from "node:dgram";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { LiveControlClient, OscArgument, OscReply, OscTypedNumber } from "./types.js";
+import { machineTokenPath } from "./machine-token.js";
 import { fromProjectRoot } from "./paths.js";
 
 export const BRIDGE_PROTOCOL = "ableton-control-deck/1";
@@ -36,14 +37,17 @@ export function asBridgeSendError(error: NodeJS.ErrnoException, bytes: number): 
   return error;
 }
 
+/** The secret, from CONTROL_DECK_TOKEN, this machine's secret file, or (installs before 1.5) data/bridge-token. */
 export function readBridgeToken(): string {
   if (process.env.CONTROL_DECK_TOKEN) return process.env.CONTROL_DECK_TOKEN;
-  try {
-    const token = readFileSync(fromProjectRoot(TOKEN_FILE), "utf8").trim();
-    if (token) return token;
-  } catch {}
+  for (const file of [machineTokenPath(), fromProjectRoot(TOKEN_FILE)]) {
+    try {
+      const token = readFileSync(file, "utf8").trim();
+      if (token) return token;
+    } catch {}
+  }
   throw new Error(
-    "No Control Deck bridge token found. Run `npm run setup` once to generate data/bridge-token and install the remote script, or set CONTROL_DECK_TOKEN."
+    `No Control Deck bridge secret found. Run \`npm run setup\` once to create ${machineTokenPath()} and install the remote script, or set CONTROL_DECK_TOKEN.`
   );
 }
 

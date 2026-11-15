@@ -4,6 +4,7 @@ import { basename, dirname, extname, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { JsonLogger } from "./logger.js";
 import { fromProjectRoot } from "./paths.js";
+import { isExternalDrive } from "./external-drive.js";
 
 const AUDIO_EXTENSIONS = new Set([".wav", ".aif", ".aiff", ".mp3", ".flac"]);
 
@@ -31,7 +32,7 @@ export class SampleIndex {
   private async setup(): Promise<{ db: DatabaseSync; config: LibraryConfig }> {
     if (this.db && this.config) return { db: this.db, config: this.config };
     const config = JSON.parse(await readFile(this.configPath, "utf8")) as LibraryConfig;
-    if (!this.allowLocalRoot && !resolve(config.root).startsWith("/Volumes/")) throw new Error("Sample root must be an absolute path on an external volume.");
+    if (!this.allowLocalRoot && !isExternalDrive(resolve(config.root))) throw new Error(process.platform === "win32" ? "Sample root must be an absolute path on a drive other than the system drive." : "Sample root must be an absolute path on an external volume.");
     await access(config.root, constants.R_OK);
     const databasePath = fromProjectRoot(config.database);
     await mkdir(dirname(databasePath), { recursive: true });

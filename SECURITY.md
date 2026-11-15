@@ -14,7 +14,7 @@ Security fixes go into the latest release.
 
 Especially welcome:
 
-- ways to reach the Live bridge (UDP 50711), the status service, the dashboard or OmniHost from another machine, or without the per-install secret in `data/bridge-token`
+- ways to reach the Live bridge (UDP 50711), the status service, the dashboard or OmniHost from another machine, or without the per-machine bridge secret
 - ways around the Live API allowlist or the exact-target safeguards, such as changing a different track, device or parameter than the one named
 - anything that makes the installer, the remote script or the sample indexer write outside its own folders
 

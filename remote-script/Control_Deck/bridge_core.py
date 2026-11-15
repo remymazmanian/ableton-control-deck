@@ -111,3 +111,27 @@ def resolve_plugin(entries, name, plugin_format, expected_path=None):
     if len(partial) > 1:
         raise BridgeError("AMBIGUOUS_PLUGIN", "Multiple plugins match; use the exact name or path", {"candidates": [public_plugin(entry) for entry in partial[:20]]})
     raise BridgeError("PLUGIN_NOT_FOUND", "No %s plugin matched '%s'" % (fmt, name))
+
+
+def machine_token_path(platform=None, environ=None, home=None):
+    """Where setup keeps this computer's bridge secret: Application Support on macOS, LOCALAPPDATA on
+    Windows. Kept out of Live's User Library, which may be synced between computers."""
+    import os
+    import sys
+    platform = platform or sys.platform
+    environ = os.environ if environ is None else environ
+    home = home or os.path.expanduser("~")
+    if platform.startswith("win"):
+        base = environ.get("LOCALAPPDATA") or os.path.join(environ.get("USERPROFILE") or home, "AppData", "Local")
+        return os.path.join(base, "Ableton Control Deck", "bridge-token")
+    return os.path.join(home, "Library", "Application Support", "Ableton Control Deck", "bridge-token")
+
+
+def read_machine_token(path=None):
+    """The secret from this computer's secret file, or None when it is missing or empty."""
+    try:
+        with open(path or machine_token_path(), "r") as handle:
+            token = handle.read().strip()
+        return token or None
+    except (IOError, OSError):
+        return None
