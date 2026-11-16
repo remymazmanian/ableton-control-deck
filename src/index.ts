@@ -40,6 +40,7 @@ server.tool("ableton_status", "Check the Control Deck Bridge connection and read
 server.tool("get_tempo", "Read the current Live Set tempo.", {}, async () => response(await commands.getTempo()));
 server.tool("set_tempo", "Set and verify the Live Set tempo.", { tempo: z.number().min(20).max(999), dryRun: z.boolean().default(false) }, async ({ tempo, dryRun }) => response(await commands.setTempo(tempo, dryRun)));
 server.tool("list_tracks", "List tracks with stable explicit index identifiers.", {}, async () => response(await commands.listTracks()));
+server.tool("get_tracks", "Alias of list_tracks.", {}, async () => response(await commands.listTracks()));
 server.tool("create_midi_track", "Create a MIDI track at index (-1 appends).", { index: z.number().int().min(-1).default(-1), dryRun: z.boolean().default(false) }, async ({ index, dryRun }) => response(await commands.createMidiTrack(index, dryRun)));
 server.tool("create_audio_track", "Create an audio track at index (-1 appends).", { index: z.number().int().min(-1).default(-1), dryRun: z.boolean().default(false) }, async ({ index, dryRun }) => response(await commands.createAudioTrack(index, dryRun)));
 server.tool("rename_track", "Rename a track selected by explicit index.", { trackIndex: z.number().int().min(0), name: z.string().min(1), dryRun: z.boolean().default(false) }, async ({ trackIndex, name, dryRun }) => response(await commands.renameTrack(trackIndex, name, dryRun)));
@@ -86,7 +87,7 @@ const volumeDecibels = z.union([z.number().min(-200).max(6), z.literal("-inf")])
 const sendDecibels = z.union([z.number().min(-200).max(0), z.literal("-inf")]);
 const anyTrackTarget = { trackKind, trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1) };
 const clipTarget = { trackIndex: z.number().int().min(0), sceneIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), expectedClipName: z.string() };
-const sceneTarget = { sceneIndex: z.number().int().min(0), expectedSceneName: z.string() };
+const sceneTarget = { sceneIndex: z.number().int().min(0), expectedSceneName: z.string({ required_error: "expectedSceneName is required: the scene's current name from list_scenes (\"\" for an unnamed scene)." }) };
 
 server.tool("get_mixer", "Read volume (value and dB), pan, mute, solo, arm, and sends. Pass trackKind and trackIndex for one track, or nothing for every track, return track, and the master.", {
   trackKind: trackKind.optional(), trackIndex: z.number().int().min(0).optional()
@@ -102,7 +103,7 @@ server.tool("set_track_mix", "Set volume (in dB or as Live's 0-1 value), pan (-1
 server.tool("get_session_playback", "Show which Session clip each track is playing or has queued, and which scenes are triggered.", {}, async () => response(await session.getSessionPlayback()));
 server.tool("fire_clip", "Launch a Session clip. Needs the current track and clip names. Launch follows the clip's quantization, and Live starts the transport if it is stopped. Reads back whether the clip is queued or playing.", { ...clipTarget, dryRun }, async input => response(await session.fireClip(input)));
 server.tool("stop_track_clips", "Stop the Session clips playing on one track, with launch quantization. Needs the current track name.", { trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), dryRun }, async input => response(await session.stopTrackClips(input)));
-server.tool("fire_scene", "Launch a Session scene. Needs the current scene name (empty string for an unnamed scene). Like clicking the scene in Live, tracks with an empty slot in that scene stop.", { ...sceneTarget, dryRun }, async input => response(await session.fireScene(input)));
+server.tool("fire_scene", "Launch a Session scene. Needs expectedSceneName, the current scene name from list_scenes (empty string for an unnamed scene). Like clicking the scene in Live, tracks with an empty slot in that scene stop.", { ...sceneTarget, dryRun }, async input => response(await session.fireScene(input)));
 server.tool("stop_all_clips", "Stop every playing Session clip. quantized=false stops them at once.", { quantized: z.boolean().default(true), dryRun }, async input => response(await session.stopAllClips(input)));
 
 server.tool("create_scene", "Create a Session scene at index (-1 appends), optionally named, and read it back.", { index: z.number().int().min(-1).default(-1), name: z.string().max(128).optional(), dryRun }, async input => response(await session.createScene(input)));
@@ -233,6 +234,24 @@ server.tool("list_plugin_presets", "List a plugin's own presets (the program lis
 server.tool("select_plugin_preset", "Switch a plugin to one of its own presets by exact name (from list_plugin_presets), then read the selection back. Pass presetIndex when several presets share a name.", {
   ...deviceTarget, presetName: z.string().min(1), presetIndex: z.number().int().min(0).optional(), dryRun: z.boolean().default(false)
 }, async input => response(await session.selectPluginPreset(input)));
+server.tool("get_device_properties", "Read a device's settings that are not in its parameter list. Wavetable: each oscillator's wavetable category and table (with the names to choose from), oscillator effect modes, unison mode and voices, mono/poly and voice count, filter routing. Simpler: playback mode, voices, retrigger, slicing mode, and the sample's markers, warping, warp mode and gain.", deviceTarget, async input => response(await session.getDeviceProperties(input)));
+server.tool("set_device_property", "Set one setting from get_device_properties and read it back. value is a number, true/false, or an option name (such as unison_mode \"Shimmer\", filter_routing \"Parallel\", or a wavetable category or table name).", {
+  ...deviceTarget, property: z.string().min(1), value: z.union([z.number(), z.boolean(), z.string()]), dryRun
+}, async input => response(await session.setDeviceProperty(input)));
+server.tool("set_wavetable", "Choose a Wavetable oscillator's wavetable by category and table name (names from get_device_properties), then read it back.", {
+  ...deviceTarget, oscillator: z.union([z.literal(1), z.literal(2)]), category: z.string().min(1), table: z.string().min(1), dryRun
+}, async input => response(await session.setWavetable(input)));
+server.tool("get_modulation_matrix", "Read Wavetable's modulation matrix: its sources (envelopes, LFOs, MIDI), every non-zero route with its amount (-1 to 1), the targets in the matrix, and parameters that can be added as targets.", {
+  ...deviceTarget, includeEmpty: z.boolean().default(false)
+}, async input => response(await session.getModulationMatrix(input)));
+server.tool("set_modulation", "Set one modulation amount in Wavetable's matrix (-1 to 1; 0 removes it), by target name and source name or index. A modulatable parameter not yet in the matrix is added. Reads the amount back.", {
+  ...deviceTarget, target: z.string().min(1), source: z.union([z.string().min(1), z.number().int().min(0)]), amount: z.number().min(-1).max(1), dryRun
+}, async input => response(await session.setModulation(input)));
+server.tool("capture_track_audio", "Record a track's, return track's, or the master's audio for a set length and measure it: loudness (LUFS), peak, RMS and crest, stereo width and correlation, spectrum (octave bands, centroid, rolloff, peaks with note names), and the level over time with the attack. Records into a temporary audio track that is removed afterwards; the file is kept in Control Deck's captures folder. Pass scene and expectedClipName to launch the source clip with the recording; otherwise the source must already be playing. Refused while Live records.", {
+  trackKind, trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), bars: z.number().min(0.25).max(64).optional(), beats: z.number().min(0.25).max(256).optional(),
+  tap: z.enum(["post_mixer", "post_fx", "pre_fx"]).default("post_mixer"), scene: z.number().int().min(0).optional(), expectedClipName: z.string().optional(), dryRun
+}, async input => response(await session.captureTrackAudio(input)));
+server.tool("analyze_audio_file", "Measure a WAV or AIFF file the same way capture_track_audio does (loudness, peak, stereo, spectrum, envelope), such as an earlier capture to compare against.", { path: z.string().min(1) }, async input => response(await session.analyzeAudio(input)));
 server.tool("get_meters", "Read every track's, return track's, and the master's output meter right now, in dB (left, right, and peak). Live's meters move in steps of about 1.5 dB, and read silence while Live is stopped.", {}, async () => response(await session.getMeters()));
 server.tool("mix_check", "Sample the output meters while Live plays (default 4 seconds) and report peak and average level per track, then flag problems: anything over 0 dBFS, a master with under 1 dB of headroom, a track playing a clip but making no sound, a track leaning hard left or right, and a track 24 dB or more below the loudest. Start playback first.", { seconds: z.number().min(1).max(30).default(4) }, async input => response(await session.mixCheck(input)));
 const automationParameter = z.discriminatedUnion("kind", [
@@ -325,7 +344,7 @@ server.tool("refresh_sample_index", "Refresh the sample index. Rebuild requires 
 const templateCategory = z.enum(["trackTemplates", "instrumentRacks", "audioEffectRacks", "drumRacks", "defaultProjectTemplates", "favoriteSerumPresets", "favoriteDeviceChains"]);
 server.tool("list_templates", "List user-configured templates, racks, presets, and device chains.", { category: templateCategory.optional() }, async ({ category }) => response(await local.listTemplates(category)));
 server.tool("load_track_template", "Report verified track-template loading capability.", { path: z.string(), dryRun: z.boolean().default(false) }, async () => response(local.unsupportedLoad("load_track_template", "track templates")));
-server.tool("load_device_preset", "Does not load anything. Load presets with: load_live_device (Live device presets by name, such as a Drift or Operator preset), load_plugin (a plugin preset file Live lists, such as a .vstpreset from list_installed_plugins), load_user_library_item (your own saved presets and racks), or select_plugin_preset (a plugin's own program list).", { path: z.string(), trackIndex: z.number().int().min(0), dryRun: z.boolean().default(false) }, async () => response(local.unsupportedLoad("load_device_preset", "device presets")));
+server.tool("load_device_preset", "Does not load anything. Find a native device's presets with list_device_presets. Load presets with: load_live_device (Live device presets by name and path, such as a Wavetable, Drift or Operator preset), load_plugin (a plugin preset file Live lists, such as a .vstpreset from list_installed_plugins), load_user_library_item (your own saved presets and racks), or select_plugin_preset (a plugin's own program list).", { path: z.string(), trackIndex: z.number().int().min(0), dryRun: z.boolean().default(false) }, async () => response(local.unsupportedLoad("load_device_preset", "device presets")));
 server.tool("load_drum_rack", "Report verified Drum Rack loading capability.", { path: z.string(), trackIndex: z.number().int().min(0), dryRun: z.boolean().default(false) }, async () => response(local.unsupportedLoad("load_drum_rack", "Drum Racks")));
 server.tool("load_instrument_rack", "Report verified Instrument Rack loading capability.", { path: z.string(), trackIndex: z.number().int().min(0), dryRun: z.boolean().default(false) }, async () => response(local.unsupportedLoad("load_instrument_rack", "Instrument Racks")));
 server.tool("load_effect_rack", "Report verified Audio Effect Rack loading capability.", { path: z.string(), trackIndex: z.number().int().min(0), dryRun: z.boolean().default(false) }, async () => response(local.unsupportedLoad("load_effect_rack", "Audio Effect Racks")));
@@ -351,6 +370,9 @@ server.tool("load_live_device", "Load a native Live device or factory preset (e.
 server.tool("load_user_library_item", "Load a User Library item, such as a saved Instrument Rack (.adg) or device preset (.adv), onto an exact track, return track, or the master (trackKind) by exact name. Ambiguous names are refused. The device chain is read back. path is a Live Browser path, not a file on disk.", {
   trackKind, trackIndex: z.number().int().min(0), expectedTrackName: z.string().min(1), name: z.string().min(1), path: z.string().min(1).optional(), dryRun: z.boolean().default(false)
 }, async input => response(await plugins.loadUserLibraryItem(input)));
+server.tool("list_device_presets", "List the presets Live's Browser has for a native device (such as Wavetable, Operator, Drift, Simpler, or an effect), from Live's library and the User Library, optionally filtered by query. Load one with the tool named in loadWith, passing its name and path. Loading an instrument preset on a track replaces the instrument there.", {
+  device: z.string().min(1), query: z.string().optional(), limit: z.number().int().min(1).max(2000).default(200)
+}, async input => response(await plugins.listDevicePresets(input)));
 
 const shutdown = () => { samples.close(); ableton.close(); omnihostClient.close(); process.exit(0); };
 process.on("SIGINT", shutdown);

@@ -46,6 +46,8 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 - Draw automation inside clips: steps or ramps for volume, pan, sends, or any device parameter, including inside racks
 - Build the Arrangement from a list of sections (scene and bars), with named locators
 - Take snapshots of the set and list exactly what changed since
+- Capture a track's, return's, or the master's audio for a set length and measure it: loudness (LUFS), peak, stereo width, spectrum with note names, and the level over time; or measure any WAV or AIFF file
+- Sound design: Wavetable's wavetables, oscillator effects, unison, voicing, and filter routing, its modulation matrix, and Simpler's modes; list a native device's presets (Live's and your own) and load one
 - Read every track's level in dB, and run a mix check that flags clipping, missing headroom, silent tracks, lopsided panning, and buried tracks
 - Reach into racks: set macros, store and recall macro variations, rename, mute, and solo chains, mute and solo drum pads, and set any parameter of a device inside a rack
 - Launch and stop Session clips and scenes, and see what is playing or queued

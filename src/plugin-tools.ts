@@ -57,14 +57,14 @@ export class PluginTools {
       acknowledgementError = error instanceof Error ? error.message : String(error);
     }
 
-    const after = await this.waitForDeviceCount(kind, input.trackIndex, before.length + 1);
+    const after = await this.waitForNewDevice(kind, input.trackIndex, before);
     const selectionRestored = await this.restoreSelectedTrack(selectedTrackBefore, kind === "track" ? input.trackIndex : undefined);
     if (!after) {
       const message = acknowledgementError ?? `Live did not confirm a new device after the bridge response.`;
       await this.logger.write({ tool: "load_plugin", args: input, bridgeRequest, response: acknowledgement, durationMs: performance.now() - started, success: false, error: message });
       return { ok: false, dryRun: false, tool: "load_plugin", data: { completedActions: acknowledgement ? ["Bridge load request acknowledged"] : [], incompleteActions: ["Bridge device-chain verification", ...(!selectionRestored ? ["Selected-track restoration"] : [])], acknowledgement, selectionRestored }, error: { code: "PLUGIN_LOAD_NOT_VERIFIED", message } };
     }
-    const newDevices = after.slice(before.length);
+    const newDevices = changedDevices(before, after);
     const result: ToolResult = { ok: true, dryRun: false, tool: "load_plugin", data: { trackKind: kind, trackIndex: input.trackIndex, trackName, resolved, acknowledgement, acknowledgementReceived: Boolean(acknowledgement), acknowledgementError, newDevices, deviceCountBefore: before.length, deviceCountAfter: after.length, selectedTrackBefore, selectionRestored, warnings: selectionRestored ? [] : ["Plugin loaded, but the prior selected track could not be restored."] } };
     await this.logger.write({ tool: "load_plugin", args: input, bridgeRequest, response: result.data, durationMs: performance.now() - started, success: true });
     return result;
@@ -72,6 +72,13 @@ export class PluginTools {
 
   async findLiveDevice(name: string, path?: string): Promise<ToolResult> {
     return this.read("find_live_device", async () => this.bridge.resolveBrowserDevice(name, path));
+  }
+
+  async listDevicePresets(input: { device: string; query?: string; limit?: number }): Promise<ToolResult> {
+    return this.read("list_device_presets", async () => {
+      const result = await this.bridge.listDevicePresets(input.device, input.query, input.limit);
+      return { ...result, presets: result.presets.map(preset => ({ ...preset, loadWith: preset.source === "user" ? "load_user_library_item" : "load_live_device" })) };
+    });
   }
 
   async loadLiveDevice(input: { trackKind?: TrackKind; trackIndex: number; expectedTrackName: string; name: string; path?: string; dryRun?: boolean }): Promise<ToolResult> {
@@ -97,14 +104,14 @@ export class PluginTools {
       acknowledgementError = error instanceof Error ? error.message : String(error);
     }
 
-    const after = await this.waitForDeviceCount(kind, input.trackIndex, before.length + 1);
+    const after = await this.waitForNewDevice(kind, input.trackIndex, before);
     const selectionRestored = await this.restoreSelectedTrack(selectedTrackBefore, kind === "track" ? input.trackIndex : undefined);
     if (!after) {
       const message = acknowledgementError ?? `Live did not confirm a new device after the bridge response.`;
       await this.logger.write({ tool: "load_live_device", args: input, bridgeRequest, response: acknowledgement, durationMs: performance.now() - started, success: false, error: message });
       return { ok: false, dryRun: false, tool: "load_live_device", data: { completedActions: acknowledgement ? ["Bridge load request acknowledged"] : [], incompleteActions: ["Bridge device-chain verification", ...(!selectionRestored ? ["Selected-track restoration"] : [])], acknowledgement, selectionRestored }, error: { code: "DEVICE_LOAD_NOT_VERIFIED", message } };
     }
-    const newDevices = after.slice(before.length);
+    const newDevices = changedDevices(before, after);
     const result: ToolResult = { ok: true, dryRun: false, tool: "load_live_device", data: { trackKind: kind, trackIndex: input.trackIndex, trackName, resolved, acknowledgement, acknowledgementReceived: Boolean(acknowledgement), acknowledgementError, newDevices, deviceCountBefore: before.length, deviceCountAfter: after.length, selectedTrackBefore, selectionRestored, warnings: selectionRestored ? [] : ["Device loaded, but the prior selected track could not be restored."] } };
     await this.logger.write({ tool: "load_live_device", args: input, bridgeRequest, response: result.data, durationMs: performance.now() - started, success: true });
     return result;
@@ -185,10 +192,11 @@ export class PluginTools {
     return latest;
   }
 
-  private async waitForDeviceCount(kind: TrackKind, trackIndex: number, expected: number): Promise<Array<{ index: number; name: string; className: string }> | null> {
+  /** Waits for a device to be added, or for one to be replaced (an instrument loaded where one already was). */
+  private async waitForNewDevice(kind: TrackKind, trackIndex: number, before: Array<{ index: number; name: string; className: string }>): Promise<Array<{ index: number; name: string; className: string }> | null> {
     for (let attempt = 0; attempt < 30; attempt++) {
       const devices = await this.getDevices(kind, trackIndex);
-      if (devices.length >= expected) return devices;
+      if (devices.length > before.length || changedDevices(before, devices).length) return devices;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     return null;
@@ -249,4 +257,9 @@ export function assertBrowserPath(path: string | undefined): void {
 function deviceChainChanged(before: Array<{ name: string; className: string }>, after: Array<{ name: string; className: string }>): boolean {
   if (before.length !== after.length) return true;
   return after.some((device, index) => device.name !== before[index]?.name || device.className !== before[index]?.className);
+}
+
+function changedDevices(before: Array<{ name: string; className: string }>, after: Array<{ index: number; name: string; className: string }>) {
+  if (after.length > before.length) return after.slice(before.length);
+  return after.filter((device, index) => before[index]?.name !== device.name || before[index]?.className !== device.className);
 }

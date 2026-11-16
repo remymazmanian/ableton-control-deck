@@ -466,6 +466,21 @@ class ControlDeckLiveTests(unittest.TestCase):
         # "Drift" is the device; the Drift.adv preset only matches when nothing is named exactly Drift.
         self.assertEqual(self.bridge._resolve_browser_item({"name": "Drift"})[1], drift)
 
+    def test_lists_a_devices_presets_from_live_and_the_user_library(self):
+        node = lambda name, children=(), loadable=False: types.SimpleNamespace(name=name, children=list(children), is_loadable=loadable)
+        wavetable = node("Wavetable", [node("Bass", [node("Deep Sub.adv", loadable=True), node("Grit Bass.adv", loadable=True)]), node("Pad", [node("Glass Pad.adv", loadable=True)])], loadable=True)
+        instruments = node("Instruments", [wavetable, node("Drift", [node("Drift Lead.adv", loadable=True)])])
+        library = node("User Library", [node("Presets", [node("Instruments", [node("Wavetable", [node("My Pad.adv", loadable=True)])])])])
+        browser = types.SimpleNamespace(instruments=instruments, audio_effects=None, midi_effects=None, drums=None, user_library=library)
+        self.bridge.application = lambda: types.SimpleNamespace(browser=browser)
+        result = self.bridge._list_device_presets({"device": "wavetable"})
+        self.assertEqual([(p["name"], p["source"]) for p in result["presets"]], [("Deep Sub", "live"), ("Grit Bass", "live"), ("Glass Pad", "live"), ("My Pad", "user")])
+        self.assertEqual(result["presets"][0]["path"], "Instruments/Wavetable/Bass/Deep Sub.adv")
+        self.assertEqual(result["presets"][3]["path"], "User Library/Presets/Instruments/Wavetable/My Pad.adv")
+        self.assertEqual(self.bridge._list_device_presets({"device": "Wavetable", "query": "pad"})["matched"], 2)
+        with self.assertRaises(bridge_module.BridgeError):
+            self.bridge._list_device_presets({"device": "Serum"})
+
     def test_loads_an_exact_user_library_device_on_a_safeguarded_track(self):
         item = types.SimpleNamespace(name="Control Deck OmniHost", children=[], is_loadable=True)
         folder = types.SimpleNamespace(name="Control Deck", children=[item], is_loadable=False)

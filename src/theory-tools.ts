@@ -1,4 +1,4 @@
-import { MidiFileTools } from "./midi-tools.js";
+import { SoundTools } from "./sound-tools.js";
 import { keyToRoot } from "./song-tools.js";
 import { chordNotes, DRUM_STYLES, drumNotes, mapDrumPads, parseNumeral, scaleSteps, SCALES, type ChordRhythm } from "./theory.js";
 import { oscInt, type ToolResult } from "./types.js";
@@ -6,7 +6,7 @@ import { noteNameToMidi } from "./validation.js";
 
 interface SlotInput { trackIndex: number; sceneIndex: number; expectedTrackName: string; clipName?: string; dryRun?: boolean }
 
-export class TheoryTools extends MidiFileTools {
+export class TheoryTools extends SoundTools {
   /** The song's key and scale from Live 12, when the scale is one these tools know. */
   private async songKey(): Promise<{ root: number; scale: string } | null> {
     try {

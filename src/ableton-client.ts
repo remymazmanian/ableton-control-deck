@@ -151,6 +151,10 @@ export class AbletonClient implements LiveControlClient {
     return this.request("devices.resolve_browser_item", { name, ...(path ? { path } : {}) }, 12_000);
   }
 
+  listDevicePresets(device: string, query?: string, limit?: number): Promise<{ device: string; total: number; matched: number; presets: Array<{ name: string; path: string; source: "live" | "user" }>; truncated: boolean }> {
+    return this.request("devices.list_presets", { device, ...(query ? { query } : {}), ...(limit ? { limit } : {}) }, 20_000);
+  }
+
   loadBrowserDevice(input: { trackIndex: number; expectedTrackName: string; name: string; path?: string }): Promise<Record<string, unknown>> {
     return this.request("devices.load_browser_item", input, 12_000);
   }

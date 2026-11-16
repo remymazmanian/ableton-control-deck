@@ -14,11 +14,12 @@ from .bridge_core import BridgeError, filter_plugins, format_from_path, machine_
 from .session_ops import SESSION_COMMANDS, SESSION_QUERIES, SessionOps
 
 
-# Commands allowed while Live records: playing, stopping, and switching recording and the metronome.
+# Commands allowed while Live records: playing, stopping, switching recording and the metronome,
+# and ending an audio capture (which records on purpose).
 TRANSPORT_COMMANDS = frozenset((
     "/live/song/start_playing", "/live/song/stop_playing", "/live/song/continue_playing",
     "/live/song/set/record_mode", "/live/song/set/session_record", "/live/song/stop_all_clips",
-    "/live/song/set/metronome",
+    "/live/song/set/metronome", "/live/capture/finish",
 ))
 SCRIPT_NAME = "Control Deck Bridge"
 SCRIPT_VERSION = "1.4.0"
@@ -184,6 +185,8 @@ class ControlDeckBridge(SessionOps, ControlSurface):
             return {"device": self._resolve_browser_item(params)[0]}
         if method == "devices.load_browser_item":
             return self._load_browser_item(params)
+        if method == "devices.list_presets":
+            return self._list_device_presets(params)
         if method == "live.query":
             return self._live_query(params)
         if method == "live.command":
@@ -214,7 +217,7 @@ class ControlDeckBridge(SessionOps, ControlSurface):
             "pluginLoading": True,
             "capabilities": [
                 "live-control", "read-back-verification", "plugin-browser", "plugin-loading", "user-device-loading",
-                "mixer", "session-launch", "scenes", "clip-properties", "undo", "track-routing", "session-notes", "return-tracks", "sample-loading", "device-control", "racks", "meters", "clip-automation", "views", "note-tools", "song-settings",
+                "mixer", "session-launch", "scenes", "clip-properties", "undo", "track-routing", "session-notes", "return-tracks", "sample-loading", "device-control", "racks", "meters", "clip-automation", "views", "note-tools", "song-settings", "device-properties", "modulation-matrix", "audio-capture",
             ],
         }
 
@@ -1036,6 +1039,54 @@ class ControlDeckBridge(SessionOps, ControlSurface):
             "deviceCountBefore": before_count,
             "selectionRestored": restored,
         }
+
+    def _list_device_presets(self, params):
+        # The presets Live's Browser shows under a device (Instruments/Wavetable/...), and the ones
+        # saved in the User Library's Presets folder for it.
+        device = str(params.get("device", "")).strip()
+        if not device:
+            raise BridgeError("INVALID_DEVICE_NAME", "A Live device name is required")
+        query = str(params.get("query") or "").strip().casefold()
+        limit = max(1, min(int(params.get("limit") or 200), 2000))
+        wanted = device.casefold()
+        found = []
+        folders = 0
+        for label, root in self._browser_roots():
+            for child in self._children(root):
+                if str(getattr(child, "name", "")).casefold() == wanted:
+                    folders += 1
+                    self._collect_presets(child, [label, str(child.name)], "live", found, 0)
+        library = getattr(self.application().browser, "user_library", None)
+        for presets in self._children(library):
+            if str(getattr(presets, "name", "")) != "Presets":
+                continue
+            for category in self._children(presets):
+                for child in self._children(category):
+                    if str(getattr(child, "name", "")).casefold() == wanted:
+                        folders += 1
+                        self._collect_presets(child, ["User Library", "Presets", str(category.name), str(child.name)], "user", found, 0)
+        if not folders:
+            raise BridgeError("LIVE_DEVICE_NOT_FOUND", "Live's Browser has no device named '%s' with presets" % device)
+        matches = [entry for entry in found if not query or query in entry["name"].casefold() or query in entry["path"].casefold()]
+        return {"device": device, "total": len(found), "matched": len(matches), "presets": matches[:limit], "truncated": len(matches) > limit}
+
+    def _children(self, node):
+        if node is None:
+            return []
+        try:
+            return list(getattr(node, "children", []) or [])
+        except Exception:
+            return []
+
+    def _collect_presets(self, node, path, source, found, depth):
+        if depth > 8 or len(found) >= 5000:
+            return
+        for child in self._children(node):
+            name = str(getattr(child, "name", ""))
+            child_path = path + [name]
+            if getattr(child, "is_loadable", False) and name.lower().endswith((".adv", ".adg")):
+                found.append({"name": name.rsplit(".", 1)[0], "path": "/".join(child_path), "source": source})
+            self._collect_presets(child, child_path, source, found, depth + 1)
 
     def _find_user_items(self, node, path, target_name, matches, depth, stem_matches=None):
         if node is None or depth > 18 or len(matches) > 20:
