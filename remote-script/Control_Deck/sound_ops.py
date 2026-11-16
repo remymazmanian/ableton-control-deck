@@ -8,7 +8,7 @@ import json
 from .bridge_core import BridgeError
 
 SOUND_QUERIES = ("/live/device/get/properties", "/live/device/get/modulation", "/live/capture/state")
-SOUND_COMMANDS = ("/live/device/set_property", "/live/device/set_modulation", "/live/capture/start", "/live/capture/finish")
+SOUND_COMMANDS = ("/live/device/set_property", "/live/device/set_modulation", "/live/capture/start", "/live/capture/record", "/live/capture/finish")
 
 CAPTURE_TRACK_NAME = "Control Deck Capture"
 CAPTURE_TAPS = {"pre_fx": "Pre FX", "post_fx": "Post FX", "post_mixer": "Post Mixer"}
@@ -70,6 +70,8 @@ class SoundOps(object):
             self._set_modulation(args)
         elif address == "/live/capture/start":
             self._start_capture(args)
+        elif address == "/live/capture/record":
+            self._record_capture()
         else:
             self._finish_capture(args)
 
@@ -257,8 +259,8 @@ class SoundOps(object):
         return state
 
     def _route_input(self, capture, source_kind, source):
-        # Live lists each track (and the main output, as Resampling) as an input for an audio track.
-        wanted = "Resampling" if source_kind == "master" else source.name
+        # Live lists every track, return track, and the main track by name as an input for an audio track.
+        wanted = source.name
         options = [option for option in list(capture.available_input_routing_types) if str(option.display_name) == wanted]
         if not options:
             raise BridgeError("CANNOT_ROUTE", "Live does not offer '%s' as an input for a new audio track" % wanted)
@@ -266,15 +268,14 @@ class SoundOps(object):
             raise BridgeError("CANNOT_ROUTE", "More than one input is named '%s'; rename the track so it is unique" % wanted)
         capture.input_routing_type = options[0]
 
-    def _route_tap(self, capture, tap, source_kind):
-        if source_kind == "master":
-            return
+    def _route_tap(self, capture, tap):
         wanted = CAPTURE_TAPS[tap]
-        for channel in list(capture.available_input_routing_channels):
+        channels = list(capture.available_input_routing_channels)
+        for channel in channels:
             if str(channel.display_name) == wanted:
                 capture.input_routing_channel = channel
                 return
-        raise BridgeError("CANNOT_ROUTE", "Live does not offer the %s tap for this track" % wanted)
+        raise BridgeError("CANNOT_ROUTE", "Live does not offer the %s tap for this track (it offers %s)" % (wanted, ", ".join(str(c.display_name) for c in channels) or "none"))
 
     def _start_capture(self, args):
         # args: kind, index, trackName, beats, tap, sourceScene (-1 for none), sourceClipName
@@ -307,17 +308,28 @@ class SoundOps(object):
         try:
             capture.name = CAPTURE_TRACK_NAME
             self._route_input(capture, source_kind, source)
-            self._route_tap(capture, tap, source_kind)
             capture.current_monitoring_state = MONITOR_OFF
             capture.arm = True
-            self._capture_was_playing = bool(song.is_playing)
-            self._capture_source_slot = source_slot
-            if source_slot is not None:
-                source_slot.fire()
-            list(capture.clip_slots)[0].fire(record_length=beats)
         except Exception:
             song.delete_track(len(list(song.tracks)) - 1)
             raise
+        # Live lists the taps (Pre FX, Post FX, Post Mixer) for a new input only after this call
+        # returns, so the tap is set and the recording started by /live/capture/record.
+        self._capture_pending = {"beats": beats, "tap": tap, "source_slot": source_slot}
+        self._capture_was_playing = bool(song.is_playing)
+        self._capture_source_slot = None
+
+    def _record_capture(self):
+        pending = getattr(self, "_capture_pending", None)
+        _index, capture = self._capture_track()
+        if capture is None or pending is None:
+            raise BridgeError("NO_CAPTURE", "Start a capture first")
+        self._capture_pending = None
+        self._route_tap(capture, pending["tap"])
+        self._capture_source_slot = pending["source_slot"]
+        if pending["source_slot"] is not None:
+            pending["source_slot"].fire()
+        list(capture.clip_slots)[0].fire(record_length=pending["beats"])
 
     def _finish_capture(self, args):
         # args: stopTransport. Stops a capture still running, the clip it launched, and removes the track.
@@ -337,6 +349,7 @@ class SoundOps(object):
                 pass
         track.arm = False
         song.delete_track(index)
+        self._capture_pending = None
         if self._flag(args[0], "stopTransport") and not getattr(self, "_capture_was_playing", True):
             song.stop_playing()
         self._capture_source_slot = None

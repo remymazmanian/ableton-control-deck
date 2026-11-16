@@ -10,7 +10,7 @@ export const CAPTURE_TAPS = ["post_mixer", "post_fx", "pre_fx"] as const;
 export type CaptureTap = typeof CAPTURE_TAPS[number];
 const KEEP_CAPTURES = 40;
 /** Wavetable's modulation sources, in matrix column order. */
-export const WAVETABLE_SOURCES = ["Env 1 (Amp)", "Env 2", "Env 3", "LFO 1", "LFO 2", "Velocity", "Note", "Pitch Bend", "Aftertouch", "Mod Wheel", "Random", "Slide"];
+export const WAVETABLE_SOURCES = ["Env 1 (Amp)", "Env 2", "Env 3", "LFO 1", "LFO 2", "Velocity", "Note", "Pitch Bend", "Pressure", "Mod Wheel", "Random", "Note PB", "Slide"];
 
 interface DeviceTarget extends TrackTarget { deviceIndex: number; expectedDeviceName: string }
 interface PropertyState { device: string; className: string; properties: Record<string, { value: number | boolean | null; options?: string[]; label?: string }>; lists: Record<string, string[]> }
@@ -96,11 +96,19 @@ export class SoundTools extends MidiFileTools {
   setWavetable(input: DeviceTarget & { oscillator: 1 | 2; category: string; table: string; dryRun?: boolean }): Promise<ToolResult> {
     return this.read("set_wavetable", async () => {
       const prefix = `oscillator_${input.oscillator}_wavetable`;
+      const before = await this.properties(input);
       const category = await this.setDeviceProperty({ ...input, property: `${prefix}_category`, value: input.category });
       if (!category.ok) throw new Error(category.error?.message ?? "Could not set the category.");
       if (input.dryRun) return { dryRun: true, category: category.intendedOperations };
       const table = await this.setDeviceProperty({ ...input, property: `${prefix}_index`, value: input.table });
-      if (!table.ok) throw new Error(table.error?.message ?? "Could not set the wavetable.");
+      if (!table.ok) {
+        // Put the oscillator back as it was, so a wrong table name changes nothing.
+        for (const field of ["category", "index"]) {
+          const value = before.properties[`${prefix}_${field}`]?.value;
+          if (typeof value === "number") await this.setDeviceProperty({ ...input, property: `${prefix}_${field}`, value });
+        }
+        throw new Error(table.error?.message ?? "Could not set the wavetable.");
+      }
       const state = await this.properties(input);
       const tables = state.lists[`oscillator_${input.oscillator}_wavetables`] ?? [];
       return { oscillator: input.oscillator, category: input.category, table: tables[Number(state.properties[`${prefix}_index`]?.value)] ?? null };
@@ -147,12 +155,14 @@ export class SoundTools extends MidiFileTools {
     const beats = input.beats ?? (input.bars ?? 2) * 4;
     const tap = input.tap ?? "post_mixer";
     const args: OscArgument[] = [input.trackKind ?? "track", oscInt(input.trackIndex), input.expectedTrackName, oscFloat(beats), tap, oscInt(input.scene ?? -1), input.expectedClipName ?? ""];
-    if (input.scene !== undefined && !input.expectedClipName) return { ok: false, dryRun: false, tool, error: { code: "INVALID_ARGUMENTS", message: "Pass expectedClipName with scene." } };
-    if (input.dryRun) return { ok: true, dryRun: true, tool, intendedOperations: [{ address: "/live/capture/start", args }, { address: "/live/capture/finish", args: [true] }] };
+    if (input.scene !== undefined && input.expectedClipName === undefined) return { ok: false, dryRun: false, tool, error: { code: "INVALID_ARGUMENTS", message: "Pass expectedClipName with scene (\"\" for an unnamed clip)." } };
+    if (input.dryRun) return { ok: true, dryRun: true, tool, intendedOperations: [{ address: "/live/capture/start", args }, { address: "/live/capture/record", args: [] }, { address: "/live/capture/finish", args: [true] }] };
     let started = false;
     try {
       await this.live.send("/live/capture/start", args);
       started = true;
+      await sleep(150);
+      await this.live.send("/live/capture/record", []);
       let state = await this.captureState();
       const seconds = (beats * 60) / state.tempo;
       // Waits for the launch (up to the launch quantization), then for the recording to finish.

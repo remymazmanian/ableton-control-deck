@@ -72,7 +72,7 @@ class SoundOpsTests(unittest.TestCase):
         def create_audio_track(index):
             track = SessionTrack("Audio", midi=False)
             track.clip_slots = [RecordingSlot(), RecordingSlot()]
-            track.available_input_routing_types = [Routing(t.name) for t in song.tracks] + [Routing("Resampling")]
+            track.available_input_routing_types = [Routing(t.name) for t in song.tracks] + [Routing("Resampling"), Routing("Main")]
             track.available_input_routing_channels = [Routing("Pre FX"), Routing("Post FX"), Routing("Post Mixer")]
             track.current_monitoring_state = 1
             song.tracks.append(track)
@@ -119,6 +119,8 @@ class SoundOpsTests(unittest.TestCase):
         source_slot = self.song.tracks[0].clip_slots[1]
         source_slot.clip = SessionClip("Lead", midi=True)
         self.command("/live/capture/start", "track", 0, "Drums", 8.0, "post_fx", 1, "Lead")
+        self.assertEqual(source_slot.fired, 0)
+        self.command("/live/capture/record")
         capture = self.song.tracks[-1]
         self.assertEqual(capture.name, "Control Deck Capture")
         self.assertEqual((capture.input_routing_type.display_name, capture.input_routing_channel.display_name), ("Drums", "Post FX"))
@@ -139,8 +141,9 @@ class SoundOpsTests(unittest.TestCase):
         self.assertIn("tap must be", self.refused("/live/capture/start", "track", 0, "Drums", 4.0, "side", -1, ""))
         self.assertIn("no clip in scene", self.refused("/live/capture/start", "track", 0, "Drums", 4.0, "post_fx", 0, "Lead"))
         self.assertIn("No 'Control Deck Capture'", self.refused("/live/capture/finish", True))
+        self.assertIn("Start a capture first", self.refused("/live/capture/record"))
         self.command("/live/capture/start", "master", 0, "Main", 4.0, "post_mixer", -1, "")
-        self.assertEqual(self.song.tracks[-1].input_routing_type.display_name, "Resampling")
+        self.assertEqual(self.song.tracks[-1].input_routing_type.display_name, "Main")
 
 
 if __name__ == "__main__":

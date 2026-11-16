@@ -22,6 +22,8 @@ In Live 12.4.16 view switching passed: to the Arrangement, the clip editor, the 
 
 Also in Live 12.4.16, clip automation passed on a Drift track: a volume ramp from silence to full (65 steps, all read back), A-Reverb send steps at −inf, −12, and −6 dB, an LP Freq ramp up and back down (97 steps), listing the three automated parameters, clearing one envelope and then all of them, and refusal of an out-of-range value, a point past the clip end, a stale parameter name, and clearing all without confirmation.
 
+In Live 12.4.16 the sound design tools passed: 632 Wavetable presets listed, Wavetable's unison (Shimmer, 5 voices), filter routing, an FM effect, and the Formant wavetable "Digital Ah" set and read back, a wrong table name leaving the oscillator unchanged, LFO 1 routed to Filter 1 Freq (added as a new target), and captures of a two-note Wavetable clip (A3 and E4 found, 3.87 s for 2 bars at 124 BPM, −19.5 LUFS), its post-FX tap, and the master while playing, each leaving no capture track behind and the transport as it was.
+
 ### Added
 
 - `capture_track_audio` records a track, return track, or the master for a set length (optionally launching its clip) into a temporary audio track, removes the track, keeps the file, and measures it: integrated and short-term loudness (LUFS), peak, RMS, crest, stereo correlation and width, octave bands, spectral centroid and rolloff, spectral peaks with note names, and the level over time with the attack. `analyze_audio_file` measures any WAV or AIFF file the same way.
