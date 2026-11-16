@@ -12,6 +12,7 @@ from .bridge_core import BridgeError
 from .automation_ops import AUTOMATION_COMMANDS, AUTOMATION_QUERIES, AutomationOps
 from .rack_ops import RACK_COMMANDS, RACK_QUERIES, RackOps
 from .song_ops import SONG_COMMANDS, SONG_QUERIES, SongOps
+from .sound_ops import SOUND_COMMANDS, SOUND_QUERIES, SoundOps
 
 
 MAX_NAME = 128
@@ -49,7 +50,7 @@ SESSION_QUERIES = (
     "/live/view/get/selection",
     "/live/meters/get",
     "/live/app_view/get",
-) + RACK_QUERIES + AUTOMATION_QUERIES + SONG_QUERIES
+) + RACK_QUERIES + AUTOMATION_QUERIES + SONG_QUERIES + SOUND_QUERIES
 SESSION_COMMANDS = (
     "/live/mixer/set",
     "/live/clip_slot/fire",
@@ -83,7 +84,7 @@ SESSION_COMMANDS = (
     "/live/clip/duplicate_loop",
     "/live/clip/crop",
     "/live/arrangement/place_section",
-) + RACK_COMMANDS + AUTOMATION_COMMANDS + SONG_COMMANDS
+) + RACK_COMMANDS + AUTOMATION_COMMANDS + SONG_COMMANDS + SOUND_COMMANDS
 # Undo and redo move through Live's history, so they must not open a step of their own.
 # Same limit as Control_Deck.MAX_ARRANGEMENT_BEATS (importing it here would be circular).
 MAX_ARRANGEMENT_BEATS = 1576800.0
@@ -97,7 +98,7 @@ MAIN_VIEWS = {"session": "Session", "arrangement": "Arranger"}
 DETAIL_VIEWS = {"clip": "Detail/Clip", "devices": "Detail/DeviceChain"}
 
 
-class SessionOps(RackOps, AutomationOps, SongOps):
+class SessionOps(RackOps, AutomationOps, SongOps, SoundOps):
     # ------------------------------------------------------------------ dispatch
 
     def _session_query(self, address, args):
@@ -140,6 +141,8 @@ class SessionOps(RackOps, AutomationOps, SongOps):
             return self._automation_query(address, args)
         if address in SONG_QUERIES:
             return self._song_query(address, args)
+        if address in SOUND_QUERIES:
+            return self._sound_query(address, args)
         raise BridgeError("ADDRESS_NOT_ALLOWED", "Unsupported Live query: %s" % address)
 
     def _session_command(self, address, args):
@@ -183,6 +186,8 @@ class SessionOps(RackOps, AutomationOps, SongOps):
             return self._automation_command(address, args)
         if address in SONG_COMMANDS:
             return self._song_command(address, args)
+        if address in SOUND_COMMANDS:
+            return self._sound_command(address, args)
         handler = handlers.get(address)
         if handler is None:
             raise BridgeError("ADDRESS_NOT_ALLOWED", "Unsupported Live mutation: %s" % address)
