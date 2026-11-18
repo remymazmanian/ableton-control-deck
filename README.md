@@ -54,10 +54,13 @@ Everything runs on your machine and binds only to loopback addresses. Nothing is
 - Create, duplicate, rename, recolor, and delete scenes, with per-scene tempo and time signature
 - Session clip properties: loop, markers, launch mode and quantization, color, mute, and audio gain, transpose, and warp; duplicate a clip to an empty slot or delete it with confirmation
 - One Live undo step per change, plus `undo` and `redo`
+- Save the open set in place and report whether it has unsaved changes (macOS)
+- While Live records, changes to the set and device loads are refused; transport and recording controls still work
 - Track color, group folding, duplication, and input and output routing by exact name
 - Inspect scenes, clips, selection, devices, and every parameter Live exposes
-- Discover, resolve, and load VST3/VST2/AU plug-ins on an exact track through Live's Browser
-- Load native Live devices (Drum Rack, Echo, Reverb, ...) by exact Browser name with ambiguity refusal
+- Discover, resolve, and load VST3 and AU plug-ins on an exact track, a return track, or the master through Live's Browser; VST2 plug-ins are refused
+- List a plug-in's own presets and switch to one by exact name
+- Load native Live devices (Drum Rack, Echo, Reverb, ...) by exact Browser name with ambiguity refusal, onto tracks, return tracks, or the master
 - Read and set third-party plug-in parameters with normalized values and readback
 - Control a fully indexed VST3 instrument through OmniHost, past Live's parameter ceiling
 - Search a local sample index by keyword, folder, BPM, key, duration, and tags

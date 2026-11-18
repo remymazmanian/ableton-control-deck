@@ -31,19 +31,7 @@ In Live 12.4.16 the sound design tools passed: 632 Wavetable presets listed, Wav
 - `get_modulation_matrix` and `set_modulation` read and write Wavetable's modulation matrix, adding a parameter as a target when needed.
 - `list_device_presets` lists a native device's presets from Live's library and the User Library; load one with `load_live_device` or `load_user_library_item`. Loading an instrument preset where an instrument already is now counts as a verified load.
 - `get_tracks` is an alias of `list_tracks`, and `fire_scene` says what `expectedSceneName` is when it is missing.
-
-### Fixed
-
-- The MCP server exits when its agent disconnects. Before, the open bridge socket kept it running, so an agent that starts a server per request left one behind each time.
-- `get_device_parameters`, `list_device_parameters`, `set_device_parameter`, `get_plugin_parameters`, `find_plugin_parameter`, and `set_plugin_parameter` take `trackKind` for a return track or the master (setting also needs `expectedTrackName`). Tested in Live 12.4.16 on UAD Lexicon 480L on a return.
-- `save_live_set` reports a set with no unsaved changes as up to date instead of failing, and `get_unsaved_status` now reads whether the set has unsaved changes (macOS).
-- `load_plugin` and `load_plugin_on_track` refuse VST2 plugins, on both the server and Live's side; load the VST3 or AU version instead.
-- `ableton_status` reports whether Live is playing or recording, with a warning while it records. While Live records, every change to the set and every device load is refused with LIVE_IS_RECORDING; playing, stopping, and switching recording and the metronome still work. Tested in Live 12.4.16: a tempo change and a device load were refused during Arrangement recording, and stopping it went through.
-- `load_plugin`, `load_plugin_on_track`, `load_live_device`, and `load_user_library_item` can load onto a return track or the master: pass `trackKind` "return" or "master", as the mixer and device tools already take.
-
-### Added
-
-- `save_live_set` saves the open set in place on macOS by choosing File > Save Live Set (through Accessibility, the only UI automation Control Deck does), then confirms the .als file changed. A set that has never been saved is refused. `get_project_path` returns the open set's file. Tested in Live 12.4.16.
+- `save_live_set` saves the open set in place on macOS by choosing File > Save Live Set (through Accessibility, the only UI automation Control Deck does), then confirms the .als file changed. A set that has never been saved is refused, and a set with no unsaved changes is reported as up to date. `get_unsaved_status` reads whether the set has unsaved changes. `get_project_path` returns the open set's file. Tested in Live 12.4.16.
 - `list_plugin_presets` and `select_plugin_preset` list a plugin's own program list and switch to a preset by exact name, read back. In Live 12.4.16, Diva and Pigments (VST3) list only "Default"; their factory presets stay inside the plugins. A `.vstpreset` that Live lists loads with `load_plugin` (tested on a return track).
 - A signed, notarized macOS installer package (`npm run build:pkg`) with Node.js 26.13.0 for Apple silicon and Intel, checked against nodejs.org's checksums and signature. A newer Homebrew Node.js is used when present. Settings, indexes, snapshots, and logs go in `~/Library/Application Support/Ableton Control Deck`, and the program stays read-only. **Uninstall Ableton Control Deck** removes the services, the remote script, the OmniHost device, and the program, and either keeps settings and snapshots or removes everything. Tested on macOS: install, a bridge round trip with Live 12.4.16, and both uninstall choices.
 - A signed Windows installer (`npm run build:win`) for x64 and Arm64, with Node.js 26.13.0 for the PC's own architecture, checked against nodejs.org's checksums and its OpenJS Foundation signature. It installs for the signed-in user with no administrator prompt, adds a Start menu entry for the dashboard, and is listed in Installed apps, where uninstalling asks whether to keep settings and snapshots. Tested on an i7 desktop and a Snapdragon Surface: install, update over an existing install, and both uninstall choices.
@@ -58,6 +46,17 @@ In Live 12.4.16 the sound design tools passed: 632 Wavetable presets listed, Wav
 - Note tools for Session clips: `quantize_clip` (Live's own Quantize, optionally one pitch), `transpose_clip_notes`, `humanize_clip_notes` (seeded, so it can be repeated), `duplicate_clip_loop`, and `crop_clip` (needs `confirm: true`).
 - `get_view` and `show_view` read and switch Live's main view (Session or Arrangement), show the clip editor or device chain or hide the Detail view, and show or hide the Browser. Switching is not an undo step.
 - `write_clip_automation`, `get_clip_automation`, and `clear_clip_automation` draw, read, and clear automation inside a Session clip for its track's volume, pan, or sends, or any device parameter by path. Points become steps or ramps, volume and sends take dB, long ramps are split into commands that fit one datagram, and every step is read back.
+
+### Changed
+
+- `ableton_status` reports whether Live is playing or recording, with a warning while it records. While Live records, every change to the set and every device load is refused with LIVE_IS_RECORDING; playing, stopping, and switching recording and the metronome still work. Tested in Live 12.4.16: a tempo change and a device load were refused during Arrangement recording, and stopping it went through.
+- `load_plugin`, `load_plugin_on_track`, `load_live_device`, and `load_user_library_item` can load onto a return track or the master: pass `trackKind` "return" or "master", as the mixer and device tools already take.
+- `get_device_parameters`, `list_device_parameters`, `set_device_parameter`, `get_plugin_parameters`, `find_plugin_parameter`, and `set_plugin_parameter` take `trackKind` for a return track or the master (setting also needs `expectedTrackName`). Tested in Live 12.4.16 on UAD Lexicon 480L on a return.
+- `load_plugin` and `load_plugin_on_track` refuse VST2 plugins, on both the server and Live's side; load the VST3 or AU version instead.
+
+### Fixed
+
+- The MCP server exits when its agent disconnects. Before, the open bridge socket kept it running, so an agent that starts a server per request left one behind each time.
 
 ## [1.4.0] - 2026-11-09
 
